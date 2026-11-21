@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台指期跨月價差・進場決策工具</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div>
+        <h1>台指期跨月價差（吃正二轉倉豆腐）進場決策工具</h1>
+        <p class="subtitle">理論價差估算 × 折溢價安全邊際 × 籌碼與結算流動性風控</p>
+      </div>
+      <div class="presets">
+        <span class="preset-label">快速情境：</span>
+        <button type="button" class="btn-chip" data-preset="default">目前實況</button>
+        <button type="button" class="btn-chip" data-preset="july_discount">7月除息低估買點</button>
+        <button type="button" class="btn-chip" data-preset="non_exdiv_golden">非除權息黃金期</button>
+        <button type="button" class="btn-chip" data-preset="settlement_blackhole">結算日13:18黑洞</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- 左側：輸入面板 -->
+      <section class="panel inputs-panel">
+        <form id="eval-form">
+          <div class="card">
+            <h2>1. 理論價差與市場報價</h2>
+            <div class="field-row">
+              <label>
+                大盤指數 / 台指期點位
+                <input type="number" id="index_level" step="10" value="23000" required />
+              </label>
+              <label>
+                無風險年利率 (%)
+                <input type="number" id="annual_rate_pct" step="0.05" value="1.75" required />
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                區間預計除息點數（蒸發點數，非除息季填 0）
+                <input type="number" id="expected_ex_div_points" step="1" min="0" value="0" required />
+              </label>
+              <label>
+                市場實際價差報價（遠月 － 近月）
+                <input type="number" id="market_spread" step="1" value="25" required />
+              </label>
+            </div>
+            <div class="twse-helper">
+              <button type="button" id="btn-fetch-twse" class="btn-secondary">查詢證交所除息預告表 (TWT48U)</button>
+              <span id="twse-status" class="muted"></span>
+            </div>
+            <div id="twse-preview" class="twse-preview hidden"></div>
+          </div>
+
+          <div class="card">
+            <h2>2. 籌碼、流動性與除息風險</h2>
+            <div class="field-row">
+              <label>
+                外資台指期未平倉淨空單（口）
+                <input type="number" id="foreign_net_short" step="500" value="28000" required />
+              </label>
+              <label>
+                價差單五檔買賣價差（委賣 － 委買 點數）
+                <input type="number" id="bid_ask_gap" step="1" min="0" value="2" required />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input type="checkbox" id="ex_div_dates_confirmed" checked />
+              <span>該月主要大型權值股除息日均已正式公告（非除權息季保持勾選）</span>
+            </label>
+          </div>
+
+          <div class="card">
+            <h2>3. 結算時間與部位規格</h2>
+            <div class="field-row">
+              <label>
+                評估時間（留空＝目前系統時間）
+                <input type="datetime-local" id="eval_datetime" />
+              </label>
+              <label>
+                手動覆寫距結算交易日（選填）
+                <input type="number" id="trading_days_override" min="0" placeholder="自動計算" />
+              </label>
+            </div>
+            <div class="field-row three">
+              <label>
+                商品規格
+                <select id="contract_type">
+                  <option value="MTX" selected>小台指 (MTX・50元/點)</option>
+                  <option value="TX">大台指 (TX・200元/點)</option>
+                  <option value="TMF">微台指 (TMF・10元/點)</option>
+                </select>
+              </label>
+              <label>
+                口數（組）
+                <input type="number" id="contracts" min="1" value="1" required />
+              </label>
+              <label>
+                預期平倉價差（選填）
+                <input type="number" id="target_exit_spread" step="1" placeholder="預設理論+25" />
+              </label>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <!-- 右側：決策儀表板 -->
+      <section class="panel results-panel">
+        <div id="signal-banner" class="signal-banner signal-green">
+          <div class="signal-title" id="signal-label">計算中...</div>
+          <div class="signal-desc" id="action-summary"></div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">理論跨月價差</div>
+            <div class="metric-value" id="val-theoretical">--</div>
+            <div class="metric-sub" id="val-formula-detail">--</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">折溢價（安全邊際）</div>
+            <div class="metric-value" id="val-discount">--</div>
+            <div class="metric-sub" id="val-label">--</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">距離近月結算</div>
+            <div class="metric-value" id="cal-days">--</div>
+            <div class="metric-sub" id="cal-dates">--</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">預估目標損益</div>
+            <div class="metric-value" id="size-profit">--</div>
+            <div class="metric-sub" id="size-stress">--</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>風控與條件檢核明細</h2>
+          <div id="factors-blockers" class="factor-group"></div>
+          <div id="factors-warnings" class="factor-group"></div>
+          <div id="factors-positives" class="factor-group"></div>
+        </div>
+
+        <div class="card">
+          <h2>進場前實戰檢核清單（下單必看）</h2>
+          <ul id="checklist" class="checklist"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
