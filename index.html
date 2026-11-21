@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=6" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=6" />
-  <link rel="manifest" href="manifest.json?v=6" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=7" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=7" />
+  <link rel="manifest" href="manifest.json?v=7" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=6" />
+  <link rel="stylesheet" href="index.css?v=7" />
 </head>
 <body>
   <header class="app-header">
@@ -73,6 +73,10 @@
             <div class="gauge-zone fair"></div>
             <div class="gauge-zone pricey"></div>
             <div class="gauge-center-tick"></div>
+            <div class="gauge-ma10-tick hidden" id="gauge-ma10-tick"></div>
+          </div>
+          <div class="gauge-ma10-row hidden" id="gauge-ma10-row">
+            <span class="gauge-ma10-tag" id="gauge-ma10-tag">10日均 --</span>
           </div>
           <div class="gauge-scale">
             <span class="g-left">便宜折價・安全邊際</span>
@@ -197,15 +201,25 @@
 
       <form id="eval-form" onsubmit="event.preventDefault();">
         <div class="card">
-          <h2>✏️ 只要填這 4 個盤中數字</h2>
+          <h2>✏️ 盤中核心數字</h2>
           <div class="row">
             <label>市場即時價差（遠月 − 近月）
               <input type="number" inputmode="decimal" id="marketSpread" step="1" />
               <span class="field-tip">券商複式單報價</span>
             </label>
-            <label>外資台指期淨空單（口）
+            <label>近 10 日均價差 MA10
+              <input type="number" inputmode="decimal" id="ma10Spread" step="0.1" placeholder="選填" />
+              <span class="field-tip">≤ MA10 為回檔買點</span>
+            </label>
+          </div>
+          <div class="row">
+            <label>投信淨多單（口・正二主力）
+              <input type="number" inputmode="numeric" id="trustNetLong" step="500" placeholder="選填" />
+              <span class="field-tip">盤後自動帶入</span>
+            </label>
+            <label>外資淨空單（口・反向賣壓）
               <input type="number" inputmode="numeric" id="foreignNetShort" step="500" />
-              <span class="field-tip">≥ 40,000 口警戒</span>
+              <span class="field-tip">投/外 ≥ 0.85 較佳</span>
             </label>
           </div>
           <div class="row">
@@ -248,9 +262,9 @@
           <div class="preset-bar">
             <span class="preset-title">💡 體驗情境：</span>
             <div class="chips">
+              <button type="button" class="chip" data-preset="nov_actual">11月實戰買點 (綠)</button>
               <button type="button" class="chip" data-preset="july_discount">7月除息買點 (綠)</button>
-              <button type="button" class="chip" data-preset="non_exdiv_golden">非除息黃金期 (綠)</button>
-              <button type="button" class="chip" data-preset="settlement_blackhole">13:18 尾盤黑洞 (紅)</button>
+              <button type="button" class="chip" data-preset="aug_overheated">8月過熱反殺 (紅)</button>
               <button type="button" class="chip" data-preset="reset">重設</button>
             </div>
           </div>
@@ -309,17 +323,18 @@
           <span>📖 30 秒看懂策略：公式、進場時機與 3 大紅線</span>
         </summary>
         <div class="collapse-body guide-body">
-          <p><strong>1. 理論價差怎麼算？</strong><br />
+          <p><strong>1. 雙軌價位判斷（理論價 ＋ 近 10 日均價差）</strong><br />
             <code>理論跨月價差 = 資金成本（指數 × 年利率 × 結算間隔天數 ÷ 365） − 區間預計除息點數</code><br />
-            市場報價低於理論值越多，代表「折價安全邊際」越高；高於理論值太多代表轉倉買盤已提前反應，不宜追價。
+            • <strong>價值折價買點</strong>：報價低於理論價，具絕對安全邊際。<br />
+            • <strong>回檔買點</strong>：正價差常態下若壓回至「近 10 日均價差（MA10）」以下，代表短線沒追高，也屬於安全卡位區。
           </p>
-          <p><strong>2. 什麼時候進場最有利？</strong><br />
-            正二 ETF 通常在結算日（每月第三個週三）前 1～3 天集中轉倉。實務上常在<strong>結算前 2～5 個交易日</strong>分批卡位「買進價差單（賣近月＋買遠月）」，等結算前一天到當天早盤價差推升後平倉。
+          <p><strong>2. 多空籌碼拔河（投信多 vs 外資空）</strong><br />
+            正二 ETF 轉倉主力反映在「投信淨多單」，當 <strong>投信淨多 ÷ 外資淨空 ≥ 0.85</strong> 時買盤足以抗衡；若遠低於 0.70 且外資多壓 1.5 萬口以上，就容易遭反向輾壓。
           </p>
           <p><strong>3. 絕對不能碰的 3 個紅線</strong><br />
             ① <strong>結算日 13:15 後</strong>：五檔稀疏滑價大，13:30 未平倉會留下純遠月多單裸露風險。<br />
-            ② <strong>市場已大幅溢價</strong>（高於理論值 &gt; 15 點）或<strong>五檔跳空 ≥ 15 點</strong>。<br />
-            ③ <strong>外資淨空單過高</strong>（≥ 4.5 萬口且折價不足 10 點），反向轉倉賣壓恐壓垮價差。
+            ② <strong>短線過熱追高</strong>：同時高於理論價且超漲近 10 日均價差（超過動態過熱上限），或<strong>五檔跳空 ≥ 15 點</strong>。<br />
+            ③ <strong>外資籌碼壓制</strong>：投信買盤顯著不敵外資空單且缺乏折價保護。
           </p>
         </div>
       </details>
@@ -328,7 +343,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="engine.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

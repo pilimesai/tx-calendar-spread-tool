@@ -129,3 +129,77 @@ test("依兩次結算日實際間隔天數計算資金成本（28天 vs 35天）
   assert.equal(r35.calendar.settlementGapDays, 35);
   assert.equal(r35.valuation.fundingCost, 60.22);
 });
+
+test("雙軌價位：2026 回檔卡位（高於理論但低於 MA10 且籌碼比達標）→ 綠燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 34000,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 18,
+    marketSpread: 97,
+    ma10Spread: 100.1,
+    trustNetLong: 36571,
+    foreignNetShort: 40958,
+    bidAskGap: 2,
+    evalDatetime: "2026-03-11T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "GREEN");
+  assert.equal(byId.valuation.badge, "回檔買點");
+  assert.equal(byId.chips.status, "pass");
+  assert.equal(r.valuation.entryType, "pullback");
+});
+
+test("雙軌價位：2026 過熱追高（超漲 MA10 超過過熱上限）→ 紅燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 44600,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 85,
+    marketSpread: 157,
+    ma10Spread: 130.6,
+    trustNetLong: 82383,
+    foreignNetShort: 86633,
+    bidAskGap: 2,
+    evalDatetime: "2026-08-12T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "RED");
+  assert.equal(byId.valuation.status, "block");
+  assert.equal(byId.valuation.badge, "過熱追高");
+  assert.equal(r.valuation.overheatCap, 18);
+});
+
+test("籌碼拔河：2026/11 雙十萬口對決（投信 10.19萬 vs 外資 10.43萬，比值 0.98）→ 綠燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 44136,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 14,
+    ma10Spread: 90.1,
+    trustNetLong: 101870,
+    foreignNetShort: 104271,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-11T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "GREEN");
+  assert.equal(byId.chips.status, "pass");
+  assert.equal(r.chips.chipRatio, 0.98);
+});
+
+test("籌碼拔河：外資大幅壓制（投信 2萬 vs 外資 5萬，無折價保護）→ 紅燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 35000,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 55,
+    ma10Spread: 60,
+    trustNetLong: 20000,
+    foreignNetShort: 50000,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-12T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "RED");
+  assert.equal(byId.chips.status, "block");
+  assert.equal(byId.chips.badge, "外資壓制");
+});

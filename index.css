@@ -255,6 +255,34 @@ body {
   background: #fff;
   transform: translateX(-50%);
 }
+.gauge-ma10-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  background: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.9);
+  transform: translateX(-50%);
+  z-index: 1;
+}
+.gauge-ma10-row {
+  position: relative;
+  height: 20px;
+  margin-top: 3px;
+}
+.gauge-ma10-tag {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
 .gauge-scale {
   display: flex;
   justify-content: space-between;

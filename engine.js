@@ -73,7 +73,9 @@
     annualRatePct: 1.75,
     expectedExDivPoints: 0,
     marketSpread: 0,
+    ma10Spread: null,
     foreignNetShort: 30000,
+    trustNetLong: null,
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -83,6 +85,12 @@
     contracts: 1,
     targetExitSpread: null,
   };
+
+  function optNum(val) {
+    if (val === null || val === "" || val === undefined) return null;
+    const n = Number(val);
+    return Number.isFinite(n) ? n : null;
+  }
 
   function evaluateEntry(input) {
     const inp = Object.assign({}, DEFAULTS, input || {});
@@ -112,26 +120,18 @@
         : countWeekdays(today, nearSettlement);
     const isSettlementDay = iso(today) === iso(nearSettlement);
 
-    // 2. 理論價差（依近月結算日到遠月結算日的實際間隔天數計算資金成本）
+    // 2. 理論價差 ＋ 近 10 日均價差 (MA10) 雙軌評估
     const settlementGapDays = Math.max(1, Math.round((farSettlement.getTime() - nearSettlement.getTime()) / 86400000));
     const fundingCost = r2(inp.indexLevel * (inp.annualRatePct / 100) * (settlementGapDays / 365));
     const theoreticalSpread = r2(fundingCost - inp.expectedExDivPoints);
     const mispricing = r2(inp.marketSpread - theoreticalSpread);
     const discountPoints = r2(-mispricing);
 
-    let valuationLabel;
-    if (mispricing <= -15) valuationLabel = "深度折價（便宜，具安全邊際）";
-    else if (mispricing < -3) valuationLabel = "微幅折價（偏便宜）";
-    else if (mispricing <= 10) valuationLabel = "合理價附近";
-    else valuationLabel = "溢價（昂貴，買盤已反映）";
-
-    let plainSummary;
-    if (mispricing <= -15) plainSummary = `比合理價便宜 ${fmt(discountPoints)} 點，具安全邊際`;
-    else if (mispricing < -3) plainSummary = `比合理價略便宜 ${fmt(discountPoints)} 點`;
-    else if (mispricing <= 0) plainSummary = `貼近合理價（便宜 ${fmt(discountPoints)} 點）`;
-    else if (mispricing <= 10) plainSummary = `比合理價略貴 ${fmt(mispricing)} 點，安全邊際偏低`;
-    else if (mispricing <= 15) plainSummary = `比合理價貴了 ${fmt(mispricing)} 點，須提防追高`;
-    else plainSummary = `比合理價貴了 ${fmt(mispricing)} 點，買盤已反映，追高風險大`;
+    const rawMa10 = optNum(inp.ma10Spread);
+    const hasMa10 = rawMa10 !== null;
+    const ma10Spread = hasMa10 ? r2(rawMa10) : null;
+    const diffFromMa10 = hasMa10 ? r2(inp.marketSpread - ma10Spread) : null;
+    const overheatCap = Math.max(15, Math.round(inp.indexLevel * 0.0004));
 
     const nearMonth = nearSettlement.getUTCMonth() + 1;
     const isExDivSeason = [6, 7, 8, 9].includes(nearMonth) || inp.expectedExDivPoints > 0;
@@ -190,31 +190,102 @@
     }
     pushFactor(liqStatus, liqMsg);
 
-    // --- 價位安全邊際 ---
-    let valStatus, valBadge, valMsg;
-    if (mispricing > 15) {
-      valStatus = "block";
-      valBadge = "大幅溢價";
-      valMsg = `市場報價（${fmt(inp.marketSpread)}）已高於理論價差（${fmt(theoreticalSpread)}）達 ${fmt(mispricing)} 點，轉倉買盤已充分反映，此時追多安全邊際不足。`;
-    } else if (mispricing > 0) {
-      valStatus = "warn";
-      valBadge = "微幅溢價";
-      valMsg = `市場報價微幅溢價 ${fmt(mispricing)} 點，目前進場屬於純賭「正二轉倉力道大於外資空單轉倉」，缺乏價值回歸保護。`;
-    } else if (mispricing <= -15) {
-      valStatus = "pass";
-      valBadge = "明顯折價";
-      valMsg = `市場報價低於理論值 ${fmt(discountPoints)} 點，具備充足安全邊際，適合分批買進價差單。`;
+    // --- 價位安全邊際（雙軌 / 單軌） ---
+    let valStatus, valBadge, valMsg, entryType, valuationLabel, plainSummary;
+    if (!hasMa10) {
+      if (mispricing <= -15) {
+        valStatus = "pass";
+        valBadge = "明顯折價";
+        entryType = "value";
+        valuationLabel = "深度折價（便宜，具安全邊際）";
+        plainSummary = `比合理價便宜 ${fmt(discountPoints)} 點，具安全邊際`;
+        valMsg = `市場報價低於理論值 ${fmt(discountPoints)} 點，具備充足安全邊際，適合分批買進價差單。`;
+      } else if (mispricing <= 0) {
+        valStatus = "pass";
+        valBadge = "合理區間";
+        entryType = "value";
+        valuationLabel = mispricing < -3 ? "微幅折價（偏便宜）" : "合理價附近";
+        plainSummary = mispricing < -3 ? `比合理價略便宜 ${fmt(discountPoints)} 點` : `貼近合理價（便宜 ${fmt(discountPoints)} 點）`;
+        valMsg = `市場報價貼近或微幅折價於理論值（折價 ${fmt(discountPoints)} 點），價位尚屬合理。`;
+      } else if (mispricing <= 15) {
+        valStatus = "warn";
+        valBadge = "微幅溢價";
+        entryType = "wait";
+        valuationLabel = mispricing <= 10 ? "合理價附近" : "溢價（昂貴，買盤已反映）";
+        plainSummary = mispricing <= 10 ? `比合理價略貴 ${fmt(mispricing)} 點，安全邊際偏低` : `比合理價貴了 ${fmt(mispricing)} 點，須提防追高`;
+        valMsg = `市場報價微幅溢價 ${fmt(mispricing)} 點，目前進場屬於純賭「正二轉倉力道大於外資空單轉倉」，缺乏價值回歸保護。`;
+      } else {
+        valStatus = "block";
+        valBadge = "大幅溢價";
+        entryType = "overheated";
+        valuationLabel = "溢價（昂貴，買盤已反映）";
+        plainSummary = `比合理價貴了 ${fmt(mispricing)} 點，買盤已反映，追高風險大`;
+        valMsg = `市場報價（${fmt(inp.marketSpread)}）已高於理論價差（${fmt(theoreticalSpread)}）達 ${fmt(mispricing)} 點，轉倉買盤已充分反映，此時追多安全邊際不足。`;
+      }
     } else {
-      valStatus = "pass";
-      valBadge = "合理區間";
-      valMsg = `市場報價貼近或微幅折價於理論值（折價 ${fmt(discountPoints)} 點），價位尚屬合理。`;
+      if (mispricing <= -15) {
+        valStatus = "pass";
+        valBadge = "價值折價";
+        entryType = "value";
+        valuationLabel = "深度折價（便宜，具安全邊際）";
+        plainSummary = `比合理價便宜 ${fmt(discountPoints)} 點，具安全邊際`;
+        valMsg = `市場報價低於理論值 ${fmt(discountPoints)} 點，具備充足絕對安全邊際，適合分批買進價差單。`;
+      } else if (mispricing <= 0) {
+        valStatus = "pass";
+        valBadge = "貼近理論價";
+        entryType = "value";
+        valuationLabel = mispricing < -3 ? "微幅折價（偏便宜）" : "合理價附近";
+        plainSummary = mispricing < -3 ? `比合理價略便宜 ${fmt(discountPoints)} 點` : `貼近合理價（便宜 ${fmt(discountPoints)} 點）`;
+        valMsg = `市場報價貼近或微幅折價於理論值（折價 ${fmt(discountPoints)} 點），價位尚屬合理。`;
+      } else if (diffFromMa10 <= 0) {
+        valStatus = "pass";
+        valBadge = "回檔買點";
+        entryType = "pullback";
+        valuationLabel = "溢價回檔至均線下（短線買點）";
+        plainSummary = `雖高於理論 ${fmt(mispricing)} 點，但低於10日均 ${fmt(-diffFromMa10)} 點（回檔買點）`;
+        valMsg = `市場報價（${fmt(inp.marketSpread)}）雖高於理論價 ${fmt(mispricing)} 點，但已回檔至近 10 日均價差（${fmt(ma10Spread)}）以下（低於均價 ${fmt(-diffFromMa10)} 點），短線未偷跑過熱。`;
+      } else if (diffFromMa10 <= overheatCap) {
+        valStatus = "warn";
+        valBadge = "偏高待回檔";
+        entryType = "wait";
+        valuationLabel = "高於均價差（偏貴待回檔）";
+        plainSummary = `高於10日均 ${fmt(diffFromMa10)} 點，建議等壓回 ${fmt(ma10Spread)} 以下`;
+        valMsg = `市場報價高於近 10 日均價差（${fmt(ma10Spread)}）達 ${fmt(diffFromMa10)} 點，尚未超過過熱上限（${overheatCap} 點），建議等壓回 ${fmt(ma10Spread)} 以下再卡位。`;
+      } else {
+        valStatus = "block";
+        valBadge = "過熱追高";
+        entryType = "overheated";
+        valuationLabel = "短線過熱溢價（追高風險大）";
+        plainSummary = `高於10日均 ${fmt(diffFromMa10)} 點（超標 ${overheatCap}），追高風險大`;
+        valMsg = `市場報價高於理論價 ${fmt(mispricing)} 點，且高於近 10 日均價差（${fmt(ma10Spread)}）達 ${fmt(diffFromMa10)} 點（超過上限 ${overheatCap} 點），短線偷跑過熱、易遭擁擠反殺。`;
+      }
     }
     pushFactor(valStatus, valMsg);
 
-    // --- 外資籌碼壓力 ---
+    // --- 籌碼力量（投信淨多單 vs 外資淨空單，無投信資料時沿用單邊門檻）---
     const fns = inp.foreignNetShort;
+    const rawTrust = optNum(inp.trustNetLong);
+    const hasTrust = rawTrust !== null;
+    const trustNetLong = hasTrust ? Math.max(0, Math.round(rawTrust)) : null;
+    const chipNetDiff = hasTrust ? trustNetLong - fns : null;
+    const chipRatio = hasTrust ? (fns > 0 ? r2(trustNetLong / fns) : 9.99) : null;
+
     let chipStatus, chipBadge, chipMsg;
-    if (fns >= 45000 && mispricing >= -10) {
+    if (hasTrust) {
+      if (fns === 0 || chipRatio >= 0.85 || chipNetDiff >= 0) {
+        chipStatus = "pass";
+        chipBadge = chipNetDiff >= 0 ? "多方占優" : "力道抗衡";
+        chipMsg = `投信淨多單 ${fmtInt(trustNetLong)} 口 vs 外資淨空單 ${fmtInt(fns)} 口（比值 ${chipRatio}），正二轉倉買盤足以抗衡外資賣壓。`;
+      } else if (chipRatio < 0.7 && -chipNetDiff >= 15000 && mispricing >= -10) {
+        chipStatus = "block";
+        chipBadge = "外資壓制";
+        chipMsg = `投信淨多單（${fmtInt(trustNetLong)} 口）明顯不敵外資淨空單（${fmtInt(fns)} 口，比值僅 ${chipRatio}、淨差 ${fmtInt(chipNetDiff)} 口），且無明顯折價保護，外資反向轉倉恐壓垮價差。`;
+      } else {
+        chipStatus = "warn";
+        chipBadge = "外資略占優";
+        chipMsg = `投信淨多單 ${fmtInt(trustNetLong)} 口 vs 外資淨空單 ${fmtInt(fns)} 口（比值 ${chipRatio}、淨差 ${fmtInt(chipNetDiff)} 口），外資空單略占上風，建議縮小部位。`;
+      }
+    } else if (fns >= 45000 && mispricing >= -10) {
       chipStatus = "block";
       chipBadge = "空單極高";
       chipMsg = `外資未平倉淨空單高達 ${fmtInt(fns)} 口（遠超 4 萬口警戒線），且價差折價不足（僅 ${fmt(discountPoints)} 點），外資反向轉倉（買近賣遠）可能壓垮價差。`;
@@ -271,10 +342,10 @@
       },
       {
         id: "chips",
-        title: "外資籌碼壓力",
+        title: hasTrust ? "多空籌碼力道" : "外資籌碼壓力",
         status: chipStatus,
         badge: chipBadge,
-        metric: `${fmtInt(fns)} 口`,
+        metric: hasTrust ? `投/外 ${chipRatio}（${chipNetDiff >= 0 ? "+" : ""}${fmtInt(chipNetDiff)}）` : `${fmtInt(fns)} 口`,
         summary: chipMsg,
       },
       {
@@ -319,7 +390,8 @@
     const spec = CONTRACT_SPECS[inp.contractType] || CONTRACT_SPECS.MTX;
     const pv = spec.pointValue;
     const hasTarget = inp.targetExitSpread !== null && inp.targetExitSpread !== "" && inp.targetExitSpread !== undefined;
-    const suggestedExit = hasTarget ? Number(inp.targetExitSpread) : Math.round((theoreticalSpread + 25) * 10) / 10;
+    const baseTarget = hasMa10 ? Math.max(theoreticalSpread, ma10Spread) : theoreticalSpread;
+    const suggestedExit = hasTarget ? Number(inp.targetExitSpread) : Math.round((baseTarget + 25) * 10) / 10;
     const expectedGainPoints = r2(suggestedExit - inp.marketSpread);
     const expectedProfitTwd = Math.round(expectedGainPoints * pv * inp.contracts);
     const stress30 = Math.round(30 * pv * inp.contracts);
@@ -355,8 +427,18 @@
         marketSpread: inp.marketSpread,
         mispricing,
         discountPoints,
+        ma10Spread,
+        diffFromMa10,
+        overheatCap,
+        entryType,
         valuationLabel,
         plainSummary,
+      },
+      chips: {
+        foreignNetShort: fns,
+        trustNetLong,
+        chipNetDiff,
+        chipRatio,
       },
       riskFactors: { blockers, warnings, positives },
       checks,

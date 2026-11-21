@@ -3,7 +3,7 @@
   "use strict";
 
   const { evaluateEntry, parseIsoDate, iso } = window.SpreadEngine;
-  const STORAGE_KEY = "tx-spread-inputs-v2";
+  const STORAGE_KEY = "tx-spread-inputs-v3";
   const DEFAULT_LIVE_API_URL = "https://tx-spread-live-proxy.pilimesai.workers.dev";
   const API_STORAGE_KEY = "tx-spread-live-api-v1";
   const POLL_STORAGE_KEY = "tx-spread-live-poll-v1";
@@ -14,7 +14,9 @@
     annualRatePct: 1.75,
     expectedExDivPoints: 0,
     marketSpread: 25,
-    foreignNetShort: 28000,
+    ma10Spread: "",
+    foreignNetShort: 30000,
+    trustNetLong: "",
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -25,17 +27,20 @@
   };
 
   const PRESETS = {
+    nov_actual: Object.assign({}, BASE, {
+      indexLevel: 44136, expectedExDivPoints: 0, marketSpread: 14, ma10Spread: 90.1,
+      trustNetLong: 101870, foreignNetShort: 104271, bidAskGap: 2,
+      evalDatetime: "2026-11-11T10:00", contractType: "MTX", targetExitSpread: 96,
+    }),
     july_discount: Object.assign({}, BASE, {
-      annualRatePct: 1.83, expectedExDivPoints: 250, marketSpread: -240, foreignNetShort: 22000,
+      annualRatePct: 1.83, expectedExDivPoints: 250, marketSpread: -240, ma10Spread: -210,
+      trustNetLong: 68000, foreignNetShort: 22000,
       evalDatetime: "2026-07-09T10:00", contractType: "TX", targetExitSpread: -170,
     }),
-    non_exdiv_golden: Object.assign({}, BASE, {
-      marketSpread: 22, foreignNetShort: 19000, bidAskGap: 1,
-      evalDatetime: "2026-11-12T10:30", contracts: 2, targetExitSpread: 65,
-    }),
-    settlement_blackhole: Object.assign({}, BASE, {
-      marketSpread: 200, foreignNetShort: 25000, bidAskGap: 42,
-      evalDatetime: "2026-11-18T13:18", contractType: "TX",
+    aug_overheated: Object.assign({}, BASE, {
+      indexLevel: 44600, expectedExDivPoints: 85, marketSpread: 157, ma10Spread: 130.6,
+      trustNetLong: 82383, foreignNetShort: 86633, bidAskGap: 2,
+      evalDatetime: "2026-08-12T10:00", contractType: "MTX", targetExitSpread: "",
     }),
   };
 
@@ -44,6 +49,7 @@
     "indexLevel", "annualRatePct", "expectedExDivPoints", "marketSpread",
     "foreignNetShort", "bidAskGap", "contracts",
   ]);
+  const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong"]);
   const STATUS_TEXT = { block: "紅線", warn: "注意", pass: "通過" };
   const STATUS_RANK = { block: 0, warn: 1, pass: 2 };
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
@@ -98,6 +104,7 @@
     for (const k of FIELDS) {
       const el = $(k);
       if (el.type === "checkbox") out[k] = el.checked;
+      else if (OPTIONAL_NUMERIC.has(k)) out[k] = el.value === "" ? null : Number(el.value);
       else if (NUMERIC.has(k)) out[k] = el.value === "" ? BASE[k] : Number(el.value);
       else out[k] = el.value;
     }
@@ -134,7 +141,9 @@
     $("gauge-plain").textContent = v.plainSummary;
     $("gauge-mid-label").textContent = `理論合理價 ${v.theoreticalSpread}`;
     $("gauge-formula").textContent =
-      `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost}（${c.settlementGapDays}天/365）− 預計除息 ${v.expectedExDivPoints}`;
+      v.ma10Spread != null
+        ? `理論價 ${v.theoreticalSpread}（${c.settlementGapDays}天/365）− 除息 ${v.expectedExDivPoints} ｜ 近10日均價差 ${v.ma10Spread}`
+        : `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost}（${c.settlementGapDays}天/365）− 預計除息 ${v.expectedExDivPoints}`;
 
     const clamped = Math.max(-60, Math.min(60, v.mispricing));
     const pct = 50 + (clamped / 60) * 46;
@@ -146,6 +155,25 @@
     if (pct < 18) pin.style.transform = "translateX(-15%)";
     else if (pct > 82) pin.style.transform = "translateX(-85%)";
     else pin.style.transform = "translateX(-50%)";
+
+    const maTick = $("gauge-ma10-tick");
+    const maRow = $("gauge-ma10-row");
+    const maTag = $("gauge-ma10-tag");
+    if (v.ma10Spread != null) {
+      const maDiff = Math.max(-60, Math.min(60, v.ma10Spread - v.theoreticalSpread));
+      const maPct = 50 + (maDiff / 60) * 42;
+      maTick.style.left = `${maPct}%`;
+      maTick.classList.remove("hidden");
+      maRow.classList.remove("hidden");
+      maTag.textContent = `10日均 ${v.ma10Spread}`;
+      maTag.style.left = `${maPct}%`;
+      if (maPct < 18) maTag.style.transform = "translateX(-15%)";
+      else if (maPct > 82) maTag.style.transform = "translateX(-85%)";
+      else maTag.style.transform = "translateX(-50%)";
+    } else {
+      maTick.classList.add("hidden");
+      maRow.classList.add("hidden");
+    }
   }
 
   function renderChecks(checks) {
@@ -278,7 +306,12 @@
 
     const mini = $("live-mini-bar");
     mini.className = `live-mini-bar ${sigCls}`;
-    const diffWord = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
+    const diffWord =
+      v.entryType === "pullback" && v.diffFromMa10 != null
+        ? `低於10日均 ${Math.round((-v.diffFromMa10) * 100) / 100} 點`
+        : v.mispricing > 0
+          ? `貴了 ${v.mispricing} 點`
+          : `便宜 ${v.discountPoints} 點`;
     const dayWord = c.isSettlementDay ? "今日結算" : `剩 ${c.tradingDaysLeft} 交易日`;
     $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}`;
 
@@ -289,8 +322,13 @@
 
     const disc = $("m-disc");
     disc.textContent = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
-    disc.className = `m-value ${v.mispricing > 0 ? "neg" : "pos"}`;
-    $("m-disc-sub").textContent = `市場報價 ${v.marketSpread}｜${v.valuationLabel}`;
+    disc.className = `m-value ${v.entryType === "value" || v.entryType === "pullback" ? "pos" : "neg"}`;
+    if (v.ma10Spread != null && v.diffFromMa10 != null) {
+      const maSign = v.diffFromMa10 >= 0 ? "+" : "";
+      $("m-disc-sub").textContent = `市場 ${v.marketSpread}｜vs 10日均 ${maSign}${v.diffFromMa10} 點`;
+    } else {
+      $("m-disc-sub").textContent = `市場報價 ${v.marketSpread}｜${v.valuationLabel}`;
+    }
 
     $("m-days").textContent = c.isSettlementDay ? "今日結算！" : `剩 ${c.tradingDaysLeft} 交易日`;
     $("m-phase").textContent = c.phaseLabel;
@@ -358,12 +396,15 @@
     }
     const tx = market.tx || {};
     const fo = market.foreign || {};
+    const tr = market.trust || {};
     const fmtD = (d) => (d && d.length === 8 ? `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6)}` : d || "--");
     const items = [
       ["資料日期", fmtD(tx.date)],
       [`近遠月價差 ${tx.near_month?.slice(4) || ""}/${tx.far_month?.slice(4) || ""}`, tx.spread ?? "--"],
+      [`近 ${tx.ma10_days || 10} 日均價差`, tx.ma10_spread ?? "--"],
       ["近月結算價", tx.near_price != null ? tx.near_price.toLocaleString("en-US") : "--"],
-      ["外資台指淨空單", fo.net_short != null ? fo.net_short.toLocaleString("en-US") + " 口" : "--"],
+      ["投信淨多單（正二）", tr.net_long != null ? tr.net_long.toLocaleString("en-US") + " 口" : "--"],
+      ["外資淨空單", fo.net_short != null ? fo.net_short.toLocaleString("en-US") + " 口" : "--"],
     ];
     box.className = "market-summary";
     box.innerHTML = "";
@@ -389,9 +430,12 @@
     if (!market) return;
     const tx = market.tx || {};
     const fo = market.foreign || {};
+    const tr = market.trust || {};
     if (tx.near_price) $("indexLevel").value = Math.round(tx.near_price);
     if (tx.spread != null) $("marketSpread").value = tx.spread;
+    if (tx.ma10_spread != null) $("ma10Spread").value = tx.ma10_spread;
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
+    if (tr.net_long != null) $("trustNetLong").value = tr.net_long;
     $("evalDatetime").value = "";
     $("nearSettlementOverride").value = "";
     render();
@@ -521,7 +565,7 @@
     let paramApi = normalizeApiUrl(params.get("api"));
     if (isSelfOrInvalidApiUrl(paramApi)) paramApi = "";
     if (paramApi) {
-      try { localStorage.setItem(API_STORAGE_KEY, paramApi); } catch (_) {}
+      try { localStorage.setItem(API_STORAGE_KEY, paramApi); } catch (_) { }
     }
     let storedApi = "";
     let storedPoll = false;
@@ -591,11 +635,18 @@
       try {
         if (liveApiUrl) localStorage.setItem(API_STORAGE_KEY, liveApiUrl);
         else localStorage.removeItem(API_STORAGE_KEY);
-      } catch (_) {}
+      } catch (_) { }
       if (!liveApiUrl) {
         setLiveStatus("已清除 API 網址。", "muted");
         return;
       }
+      $("live-api-panel").classList.add("hidden");
+      await fetchLiveQuote({ silent: false });
+    });
+    $("btn-reset-api").addEventListener("click", async () => {
+      try { localStorage.removeItem(API_STORAGE_KEY); } catch (_) { }
+      liveApiUrl = DEFAULT_LIVE_API_URL;
+      $("live-api-url").value = liveApiUrl;
       $("live-api-panel").classList.add("hidden");
       await fetchLiveQuote({ silent: false });
     });
@@ -609,11 +660,11 @@
 
     $("chk-live-poll").addEventListener("change", () => {
       const on = $("chk-live-poll").checked;
-      try { localStorage.setItem(POLL_STORAGE_KEY, on ? "1" : "0"); } catch (_) {}
+      try { localStorage.setItem(POLL_STORAGE_KEY, on ? "1" : "0"); } catch (_) { }
       if (on) {
         if (!liveApiUrl) {
           $("chk-live-poll").checked = false;
-          try { localStorage.setItem(POLL_STORAGE_KEY, "0"); } catch (_) {}
+          try { localStorage.setItem(POLL_STORAGE_KEY, "0"); } catch (_) { }
           $("live-api-panel").classList.remove("hidden");
           setLiveStatus("請先設定 Cloudflare Worker 網址，才能開啟 15 秒自動更新。", "err");
           return;
