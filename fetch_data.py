@@ -8,6 +8,7 @@
 - 期交所 OpenAPI：三大法人台指期未平倉 → 投信淨多單、外資淨空單
 - 銀行公會 TAIBOR：1 個月期定盤利率 → 無風險短期年利率
 - 證交所：除權除息預告表（TWT48U）
+- 證交所：每日盤後統計（FMTQIK）→ 加權指數近 5 日漲跌幅
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ TAIFEX_FUT_CSV = "https://www.taifex.com.tw/cht/3/futDataDown"
 TAIBOR_DAILY_INDEX = "https://www.ba.org.tw/taiborDaily/index"
 TAIBOR_DOWNLOAD_BASE = "https://www.ba.org.tw/taiborDaily/DownloadAll?id="
 TWSE_EXDIV = "https://www.twse.com.tw/rwd/zh/exRight/TWT48U?response=json"
+TWSE_FMTQIK = "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym}01&response=json"
 
 
 def get_json(url: str):
@@ -226,11 +228,47 @@ def fetch_taibor_1m() -> dict:
 
 
 def roc_to_iso(s: str) -> str | None:
-    m = re.match(r"(\d+)年(\d+)月(\d+)日", s or "")
+    m = re.match(r"(\d+)[年/](\d+)[月/](\d+)日?", (s or "").strip())
     if not m:
         return None
     y, mo, d = (int(x) for x in m.groups())
     return f"{y + 1911:04d}-{mo:02d}-{d:02d}"
+
+
+def fetch_taiex_5d() -> dict:
+    """抓取證交所加權指數當月與前月日收盤，計算近 5 個交易日漲跌幅。"""
+    now = datetime.now(TPE).date()
+    first_of_month = now.replace(day=1)
+    prev_month = first_of_month - timedelta(days=1)
+    yms = [prev_month.strftime("%Y%m"), first_of_month.strftime("%Y%m")]
+
+    by_date: dict[str, float] = {}
+    for ym in yms:
+        payload = get_json(TWSE_FMTQIK.format(ym=ym))
+        if payload.get("stat") != "OK":
+            continue
+        for row in payload.get("data", []) or []:
+            if len(row) < 5:
+                continue
+            date_iso = roc_to_iso(row[0])
+            close_val = to_num(row[4])
+            if date_iso and close_val is not None:
+                by_date[date_iso] = close_val
+
+    items = sorted(by_date.items())
+    if len(items) < 6:
+        raise RuntimeError("證交所加權指數歷史日數不足 6 個交易日")
+
+    latest_date, latest_close = items[-1]
+    base_date, base_close = items[-6]
+    change_5d_pct = round((latest_close / base_close - 1) * 100, 2)
+    return {
+        "date": latest_date,
+        "close": round(latest_close, 2),
+        "base_date": base_date,
+        "base_close": round(base_close, 2),
+        "change_5d_pct": change_5d_pct,
+    }
 
 
 def fetch_exdiv() -> list[dict]:
@@ -304,10 +342,17 @@ def main() -> int:
         if "exdiv" in old:
             result["exdiv"] = old["exdiv"]
 
+    try:
+        result["taiex"] = fetch_taiex_5d()
+    except Exception as exc:
+        result["errors"].append(f"taiex: {exc}")
+        if "taiex" in old:
+            result["taiex"] = old["taiex"]
+
     if (
         OUT.exists()
-        and len(result["errors"]) < 4
-        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "rate", "exdiv"))
+        and len(result["errors"]) < 5
+        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "rate", "exdiv", "taiex"))
     ):
         print("Data unchanged, skipping write")
         return 0
@@ -316,7 +361,7 @@ def main() -> int:
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "exdiv"}, ensure_ascii=False, indent=1))
     print(f"exdiv rows: {len(result.get('exdiv', []))}")
-    return 0 if len(result["errors"]) < 4 else 1
+    return 0 if len(result["errors"]) < 5 else 1
 
 
 if __name__ == "__main__":

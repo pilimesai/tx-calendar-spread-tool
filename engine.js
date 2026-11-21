@@ -76,6 +76,7 @@
     ma10Spread: null,
     foreignNetShort: 30000,
     trustNetLong: null,
+    taiex5dChangePct: null,
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -135,6 +136,7 @@
 
     const nearMonth = nearSettlement.getUTCMonth() + 1;
     const isExDivSeason = [6, 7, 8, 9].includes(nearMonth) || inp.expectedExDivPoints > 0;
+    const isExDivPeak = [6, 7].includes(nearMonth) || inp.expectedExDivPoints >= 150;
 
     const blockers = [];
     const warnings = [];
@@ -189,6 +191,37 @@
       liqMsg = `五檔買賣價差緊密（${fmt(inp.bidAskGap)} 點），流動性良好。`;
     }
     pushFactor(liqStatus, liqMsg);
+
+    // --- 大盤近 5 日急殺風控 ---
+    const rawRet5 = optNum(inp.taiex5dChangePct);
+    const hasRet5 = rawRet5 !== null;
+    const taiex5dChangePct = hasRet5 ? r2(rawRet5) : null;
+
+    let crashStatus, crashBadge, crashMetric, crashMsg;
+    if (!hasRet5) {
+      crashStatus = "pass";
+      crashBadge = "未提供";
+      crashMetric = "未填寫";
+      crashMsg = "未填入大盤近 5 日漲跌幅，預設無系統性急殺異常（建議由盤後資料自動帶入）。";
+    } else if (taiex5dChangePct <= -5) {
+      crashStatus = "block";
+      crashBadge = "崩盤急殺";
+      crashMetric = `${fmt(taiex5dChangePct)}%`;
+      crashMsg = `加權指數近 5 個交易日暴跌 ${fmt(Math.abs(taiex5dChangePct))}%（已達 5% 崩盤急殺紅線），正二 ETF 恐因淨值重挫被迫減碼多單且遠月賣壓失控，就算價差折價也不宜接刀，建議直接跳過本月。`;
+      pushFactor("block", crashMsg);
+    } else if (taiex5dChangePct <= -3) {
+      crashStatus = "warn";
+      crashBadge = "急殺警戒";
+      crashMetric = `${fmt(taiex5dChangePct)}%`;
+      crashMsg = `加權指數近 5 個交易日急跌 ${fmt(Math.abs(taiex5dChangePct))}%（超過 3% 急殺警戒線），恐壓抑正二轉倉買盤並放大遠月賣壓，已自動降燈警戒，建議觀望或等大盤止穩再進場。`;
+      pushFactor("warn", crashMsg);
+    } else {
+      crashStatus = "pass";
+      crashBadge = "波動正常";
+      crashMetric = `${taiex5dChangePct >= 0 ? "+" : ""}${fmt(taiex5dChangePct)}%`;
+      crashMsg = `加權指數近 5 個交易日漲跌幅為 ${taiex5dChangePct >= 0 ? "+" : ""}${fmt(taiex5dChangePct)}%，未出現 3% 以上系統性急殺。`;
+      pushFactor("pass", crashMsg);
+    }
 
     // --- 價位安全邊際（雙軌 / 單軌） ---
     let valStatus, valBadge, valMsg, entryType, valuationLabel, plainSummary;
@@ -304,14 +337,37 @@
     }
     pushFactor(chipStatus, chipMsg);
 
-    // --- 除權息變數 ---
+    // --- 除權降口建議 & 除權息變數 ---
+    const exDivSizeCut = isExDivPeak;
+    const sizeMultiplier = isExDivPeak ? 0.5 : 1;
+    const recommendedContracts = isExDivPeak ? Math.max(1, Math.floor(inp.contracts / 2)) : inp.contracts;
+    const suggestSmallerContract = isExDivPeak && inp.contracts === 1 && inp.contractType !== "TMF";
+    let sizeCutHint = null;
+    if (isExDivPeak) {
+      if (inp.contracts >= 2) {
+        sizeCutHint = `6～7月／大除息高峰建議減半口數：${inp.contracts} 口 → ${recommendedContracts} 口`;
+      } else if (inp.contractType === "TX") {
+        sizeCutHint = "6～7月／大除息高峰僅 1 口大台無法減半，建議降規格改做 1～2 口小台（MTX）";
+      } else if (inp.contractType === "MTX") {
+        sizeCutHint = "6～7月／大除息高峰僅 1 口小台無法減半，建議降規格改做 2 口微台（TMF）";
+      } else {
+        sizeCutHint = "6～7月／大除息高峰維持 1 口微台（已為最小規格）輕倉操作";
+      }
+    }
+
     let exStatus, exBadge, exMsg;
     if (isExDivSeason && !inp.exDivDatesConfirmed) {
       exStatus = "warn";
-      exBadge = "日期未全定";
+      exBadge = isExDivPeak ? "高峰未全定" : "日期未全定";
       exMsg =
-        "目前處於除權息影響區間，但主要權值股除息日尚未完全公告，存在「除息日跨月跳動」或「股利不如預期」的劇烈跳空風險，建議等主要權值股除息日確定後再進場。";
+        "目前處於除權息影響區間，但主要權值股除息日尚未完全公告，存在「除息日跨月跳動」或「股利不如預期」的劇烈跳空風險，建議等主要權值股除息日確定後再進場" +
+        (isExDivPeak ? `；且屬除息高峰，進場務必降口（${sizeCutHint}）。` : "。");
       pushFactor("warn", exMsg);
+    } else if (isExDivPeak) {
+      exStatus = "pass";
+      exBadge = "高峰降口";
+      exMsg = `區間主要大型權值股除息日已正式公告，但屬 6～7 月／大除息高峰（預計除息 ${fmt(inp.expectedExDivPoints)} 點），除息估算誤差與波動較大，${sizeCutHint}。`;
+      pushFactor("pass", exMsg);
     } else if (isExDivSeason) {
       exStatus = "pass";
       exBadge = "日期已確認";
@@ -339,6 +395,14 @@
         badge: phaseLabel,
         metric: isSettlementDay ? "今日結算" : `剩 ${tradingDaysLeft} 交易日`,
         summary: timingMsg,
+      },
+      {
+        id: "marketCrash",
+        title: "大盤急殺風控",
+        status: crashStatus,
+        badge: crashBadge,
+        metric: crashMetric,
+        summary: crashMsg,
       },
       {
         id: "chips",
@@ -373,17 +437,21 @@
       signalShort = "先別進場";
       signalLabel = "🔴 不建議進場（觸發風控紅線）";
       actionSummary = "目前存在明確紅線風險，建議觀望或等待條件改善後再評估。";
-    } else if (warnings.length >= 2 || (mispricing > 0 && warnings.length >= 1)) {
+    } else if (warnings.length >= 2 || (mispricing > 0 && warnings.length >= 1) || crashStatus === "warn") {
       signal = "YELLOW";
       signalShort = "謹慎評估／小額試單";
       signalLabel = "🟡 謹慎評估／小額試單";
       actionSummary =
-        "部分條件未達理想或存在潛在變數，若欲參與建議以小台（MTX）或微台（TMF）輕倉分批試單，並嚴控出場時機。";
+        (crashStatus === "warn" ? "大盤近 5 日急跌逾 3%，已自動降燈警戒；" : "") +
+        "部分條件未達理想或存在潛在變數，若欲參與建議以小台（MTX）或微台（TMF）輕倉分批試單，並嚴控出場時機。" +
+        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "");
     } else {
       signal = "GREEN";
       signalShort = "可以分批進場";
       signalLabel = "🟢 建議分批進場（具策略優勢）";
-      actionSummary = "時間點、折溢價安全邊際與籌碼條件皆符合策略要求，可分批掛 ROD 限價「買進」跨月價差複式單。";
+      actionSummary =
+        "時間點、折溢價安全邊際與籌碼條件皆符合策略要求，可分批掛 ROD 限價「買進」跨月價差複式單。" +
+        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "");
     }
 
     // 6. 損益
@@ -396,10 +464,16 @@
     const expectedProfitTwd = Math.round(expectedGainPoints * pv * inp.contracts);
     const stress30 = Math.round(30 * pv * inp.contracts);
     const stress50 = Math.round(50 * pv * inp.contracts);
+    const recommendedProfitTwd = Math.round(expectedGainPoints * pv * recommendedContracts);
+    const recommendedStress30 = Math.round(30 * pv * recommendedContracts);
+    const recommendedStress50 = Math.round(50 * pv * recommendedContracts);
 
     const checklist = [
       `使用券商軟體「台指期價差（複式單）」介面，選擇 ${inp.contractType} 近月／遠月組合，切勿分開單邊下單。`,
       "建倉方向選擇「買進」價差單（系統同步成交：賣出近月 ＋ 買進遠月），委託條件限用「ROD 限價單」。",
+      ...(isExDivPeak
+        ? [`⚠️ 除權息高峰降口確認：${sizeCutHint}，避免單月除息估算誤差放大波動。`]
+        : []),
       `帳上除價差減收保證金外，至少多預留 1～2 倍緩衝資金（預估盤中 30～50 點反向洗盤波動約 NT$ ${fmtInt(stress30)} ～ NT$ ${fmtInt(stress50)}）。`,
       "結算前一天至結算日早盤正二轉倉推升時，分批掛「賣出」價差限價單停利。",
       `務必於結算日（${iso(nearSettlement)}）13:00～13:15 前全數平倉，避開 13:15 後流動性黑洞與 13:30 強制現金結算風險。`,
@@ -418,7 +492,13 @@
         tradingDaysLeft,
         isSettlementDay,
         isExDivSeason,
+        isExDivPeak,
         phaseLabel,
+      },
+      marketRisk: {
+        taiex5dChangePct,
+        status: crashStatus,
+        badge: crashBadge,
       },
       valuation: {
         fundingCost,
@@ -446,11 +526,19 @@
         contractName: spec.name,
         pointValue: pv,
         contracts: inp.contracts,
+        exDivSizeCut,
+        sizeMultiplier,
+        recommendedContracts,
+        suggestSmallerContract,
+        sizeCutHint,
         suggestedExitSpread: suggestedExit,
         expectedGainPoints,
         expectedProfitTwd,
+        recommendedProfitTwd,
         stressLoss30Twd: stress30,
         stressLoss50Twd: stress50,
+        recommendedStress30Twd: recommendedStress30,
+        recommendedStress50Twd: recommendedStress50,
       },
       checklist,
     };

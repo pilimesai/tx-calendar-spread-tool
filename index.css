@@ -444,6 +444,18 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .check { flex-direction: row; align-items: center; gap: 10px; color: var(--text); font-size: 0.88rem; min-height: 40px; cursor: pointer; }
 .check input { width: 20px; height: 20px; flex-shrink: 0; }
 
+.size-cut-note {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--yellow-bg);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-left: 4px solid var(--yellow);
+  color: #fde68a;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .btn {
   min-height: 42px;

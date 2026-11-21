@@ -17,6 +17,7 @@
     ma10Spread: "",
     foreignNetShort: 30000,
     trustNetLong: "",
+    taiex5dChangePct: "",
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -29,18 +30,23 @@
   const PRESETS = {
     nov_actual: Object.assign({}, BASE, {
       indexLevel: 44136, expectedExDivPoints: 0, marketSpread: 14, ma10Spread: 90.1,
-      trustNetLong: 101870, foreignNetShort: 104271, bidAskGap: 2,
+      trustNetLong: 101870, foreignNetShort: 104271, taiex5dChangePct: 3.0, bidAskGap: 2,
       evalDatetime: "2026-11-11T10:00", contractType: "MTX", targetExitSpread: 96,
     }),
     july_discount: Object.assign({}, BASE, {
       annualRatePct: 1.83, expectedExDivPoints: 250, marketSpread: -240, ma10Spread: -210,
-      trustNetLong: 68000, foreignNetShort: 22000,
-      evalDatetime: "2026-07-09T10:00", contractType: "TX", targetExitSpread: -170,
+      trustNetLong: 68000, foreignNetShort: 22000, taiex5dChangePct: 0.5,
+      evalDatetime: "2026-07-09T10:00", contractType: "TX", contracts: 2, targetExitSpread: -170,
     }),
     aug_overheated: Object.assign({}, BASE, {
       indexLevel: 44600, expectedExDivPoints: 85, marketSpread: 157, ma10Spread: 130.6,
-      trustNetLong: 82383, foreignNetShort: 86633, bidAskGap: 2,
+      trustNetLong: 82383, foreignNetShort: 86633, taiex5dChangePct: 2.0, bidAskGap: 2,
       evalDatetime: "2026-08-12T10:00", contractType: "MTX", targetExitSpread: "",
+    }),
+    apr_crash: Object.assign({}, BASE, {
+      indexLevel: 17392, expectedExDivPoints: 3, marketSpread: -7, ma10Spread: 15.8,
+      trustNetLong: 27325, foreignNetShort: 27871, taiex5dChangePct: -16.0, bidAskGap: 2,
+      evalDatetime: "2025-04-09T10:00", contractType: "MTX", targetExitSpread: "",
     }),
   };
 
@@ -49,7 +55,7 @@
     "indexLevel", "annualRatePct", "expectedExDivPoints", "marketSpread",
     "foreignNetShort", "bidAskGap", "contracts",
   ]);
-  const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong"]);
+  const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong", "taiex5dChangePct"]);
   const STATUS_TEXT = { block: "紅線", warn: "注意", pass: "通過" };
   const STATUS_RANK = { block: 0, warn: 1, pass: 2 };
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
@@ -338,11 +344,25 @@
     $("m-phase").textContent = c.phaseLabel;
     $("m-days-sub").textContent = `近 ${c.nearSettlement}｜遠 ${c.farSettlement}`;
 
+    const sizeNote = $("size-cut-note");
+    if (s.exDivSizeCut && s.sizeCutHint) {
+      sizeNote.textContent = `⚠️ 除權降口建議：${s.sizeCutHint}`;
+      sizeNote.classList.remove("hidden");
+    } else {
+      sizeNote.textContent = "";
+      sizeNote.classList.add("hidden");
+    }
+
     const p = $("m-profit");
     p.textContent = s.expectedProfitTwd >= 0 ? `預計賺 ${money(s.expectedProfitTwd)}` : `預估虧 ${money(s.expectedProfitTwd)}`;
     p.className = `m-value ${s.expectedProfitTwd >= 0 ? "pos" : "neg"}`;
+    const profitPrefix = s.exDivSizeCut
+      ? (s.contracts >= 2
+        ? `⚠️ 降口 ${s.recommendedContracts} 口預估 ${money(s.recommendedProfitTwd)}｜`
+        : `⚠️ ${s.sizeCutHint}｜`)
+      : "";
     $("m-profit-sub").textContent =
-      `目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
+      `${profitPrefix}目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
 
     renderChecks(r.checks);
     renderChecklist(r.checklist);
@@ -426,11 +446,15 @@
       d.append(kk, vv);
       box.appendChild(d);
     }
+    const infoParts = [];
     if (market.rate?.annual_rate_pct != null) {
-      rateEl.textContent = `📌 公開短期利率：${market.rate.annual_rate_pct}%（${market.rate.source}・${market.rate.date}）`;
-    } else {
-      rateEl.textContent = "";
+      infoParts.push(`📌 公開短期利率：${market.rate.annual_rate_pct}%（${market.rate.source}・${market.rate.date}）`);
     }
+    if (market.taiex?.change_5d_pct != null) {
+      const chg = market.taiex.change_5d_pct;
+      infoParts.push(`📉 加權近 5 日：${chg >= 0 ? "+" : ""}${chg}%（${market.taiex.date}）`);
+    }
+    rateEl.textContent = infoParts.join("｜");
     if (!hasLiveQuote) {
       status.textContent = `✅ 盤後資料 ${fmtD(tx.date)}`;
       status.className = "data-status ok";
@@ -447,6 +471,7 @@
     if (tx.ma10_spread != null) $("ma10Spread").value = tx.ma10_spread;
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
     if (tr.net_long != null) $("trustNetLong").value = tr.net_long;
+    if (market.taiex?.change_5d_pct != null) $("taiex5dChangePct").value = market.taiex.change_5d_pct;
     if (market.rate?.annual_rate_pct != null) $("annualRatePct").value = market.rate.annual_rate_pct;
     $("evalDatetime").value = "";
     $("nearSettlementOverride").value = "";
@@ -721,6 +746,9 @@
     } else {
       if (market?.rate?.annual_rate_pct != null && Number($("annualRatePct").value) === BASE.annualRatePct) {
         $("annualRatePct").value = market.rate.annual_rate_pct;
+      }
+      if (saved && saved.taiex5dChangePct === undefined && market?.taiex?.change_5d_pct != null) {
+        $("taiex5dChangePct").value = market.taiex.change_5d_pct;
       }
       render();
     }

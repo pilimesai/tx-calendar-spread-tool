@@ -72,7 +72,7 @@ test("結算日過後自動換到下個月", () => {
   assert.equal(r.calendar.farSettlement, "2027-01-20");
 });
 
-test("結構化體檢輸出：綠燈情境回傳 5 項全通過與黃金卡位期", () => {
+test("結構化體檢輸出：綠燈情境回傳 6 項全通過與黃金卡位期", () => {
   const r = evaluateEntry({
     indexLevel: 23000,
     annualRatePct: 1.826,
@@ -84,7 +84,7 @@ test("結構化體檢輸出：綠燈情境回傳 5 項全通過與黃金卡位�
   });
   assert.equal(r.signalShort, "可以分批進場");
   assert.equal(r.calendar.phaseLabel, "黃金卡位期");
-  assert.equal(r.checks.length, 5);
+  assert.equal(r.checks.length, 6);
   assert.ok(r.checks.every((c) => c.status === "pass"));
   assert.ok(r.valuation.plainSummary.includes("便宜"));
 });
@@ -202,4 +202,123 @@ test("籌碼拔河：外資大幅壓制（投信 2萬 vs 外資 5萬，無折價
   assert.equal(r.signal, "RED");
   assert.equal(byId.chips.status, "block");
   assert.equal(byId.chips.badge, "外資壓制");
+});
+
+test("大盤近 5 日急跌 -3.5% → 強制降為黃燈警戒", () => {
+  const r = evaluateEntry({
+    indexLevel: 44136,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 14,
+    ma10Spread: 90.1,
+    trustNetLong: 101870,
+    foreignNetShort: 104271,
+    taiex5dChangePct: -3.5,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-11T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "YELLOW");
+  assert.equal(r.marketRisk.status, "warn");
+  assert.equal(byId.marketCrash.status, "warn");
+  assert.equal(byId.marketCrash.badge, "急殺警戒");
+  assert.ok(r.actionSummary.includes("急跌逾 3%"));
+});
+
+test("大盤近 5 日暴跌 -16%（2025/04 關稅股災情境）→ 紅燈禁止接刀", () => {
+  const r = evaluateEntry({
+    indexLevel: 17392,
+    annualRatePct: 1.6,
+    expectedExDivPoints: 3,
+    marketSpread: -7,
+    ma10Spread: 15.8,
+    trustNetLong: 27325,
+    foreignNetShort: 27871,
+    taiex5dChangePct: -16.0,
+    bidAskGap: 2,
+    evalDatetime: "2025-04-09T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "RED");
+  assert.equal(r.marketRisk.status, "block");
+  assert.equal(byId.marketCrash.status, "block");
+  assert.equal(byId.marketCrash.badge, "崩盤急殺");
+});
+
+test("大盤近 5 日正常波動 -2.0% → 維持綠燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 44136,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 14,
+    ma10Spread: 90.1,
+    trustNetLong: 101870,
+    foreignNetShort: 104271,
+    taiex5dChangePct: -2.0,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-11T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "GREEN");
+  assert.equal(r.marketRisk.status, "pass");
+  assert.equal(byId.marketCrash.badge, "波動正常");
+});
+
+test("除權降口：7 月高峰 4 口建議減半為 2 口且維持綠燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 23000,
+    annualRatePct: 1.826,
+    expectedExDivPoints: 250,
+    marketSpread: -240,
+    foreignNetShort: 22000,
+    bidAskGap: 2,
+    evalDatetime: "2026-07-09T10:00",
+    contractType: "MTX",
+    contracts: 4,
+    targetExitSpread: -170,
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "GREEN");
+  assert.equal(r.calendar.isExDivPeak, true);
+  assert.equal(r.sizing.exDivSizeCut, true);
+  assert.equal(r.sizing.recommendedContracts, 2);
+  assert.equal(r.sizing.recommendedProfitTwd, r.sizing.expectedProfitTwd / 2);
+  assert.equal(byId.exdiv.badge, "高峰降口");
+  assert.ok(r.actionSummary.includes("除權降口"));
+  assert.ok(r.checklist.some((item) => item.includes("除權息高峰降口確認")));
+});
+
+test("除權降口：6 月僅 1 口大台提示降規格改做小台，非高峰月不降口", () => {
+  const rJune = evaluateEntry({
+    indexLevel: 23000,
+    annualRatePct: 1.8,
+    expectedExDivPoints: 280,
+    marketSpread: -260,
+    foreignNetShort: 20000,
+    bidAskGap: 2,
+    evalDatetime: "2026-06-11T10:00",
+    contractType: "TX",
+    contracts: 1,
+  });
+  assert.equal(rJune.sizing.exDivSizeCut, true);
+  assert.equal(rJune.sizing.recommendedContracts, 1);
+  assert.equal(rJune.sizing.suggestSmallerContract, true);
+  assert.ok(rJune.sizing.sizeCutHint.includes("小台（MTX）"));
+
+  const rNov = evaluateEntry({
+    indexLevel: 44136,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 14,
+    ma10Spread: 90.1,
+    trustNetLong: 101870,
+    foreignNetShort: 104271,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-11T10:00",
+    contracts: 4,
+  });
+  assert.equal(rNov.calendar.isExDivPeak, false);
+  assert.equal(rNov.sizing.exDivSizeCut, false);
+  assert.equal(rNov.sizing.recommendedContracts, 4);
+  assert.equal(rNov.sizing.sizeCutHint, null);
 });
