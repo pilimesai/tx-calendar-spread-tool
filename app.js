@@ -1,9 +1,13 @@
-/* 介面邏輯：讀取盤後資料、收集參數、呼叫 SpreadEngine、渲染視覺化儀表板 */
+/* 介面邏輯：讀取盤後／盤中即時資料、收集參數、呼叫 SpreadEngine、渲染視覺化儀表板 */
 (function () {
   "use strict";
 
   const { evaluateEntry, parseIsoDate, iso } = window.SpreadEngine;
   const STORAGE_KEY = "tx-spread-inputs-v2";
+  const DEFAULT_LIVE_API_URL = "";
+  const API_STORAGE_KEY = "tx-spread-live-api-v1";
+  const POLL_STORAGE_KEY = "tx-spread-live-poll-v1";
+  const POLL_INTERVAL_MS = 15000;
 
   const BASE = {
     indexLevel: 23000,
@@ -45,8 +49,16 @@
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
 
   let market = null;
+  let liveApiUrl = "";
+  let pollTimer = null;
+  let isFetchingLive = false;
+  let hasLiveQuote = false;
   const checkedSteps = new Set();
   const $ = (id) => document.getElementById(id);
+
+  function normalizeApiUrl(raw) {
+    return String(raw || "").trim().replace(/\/+$/, "");
+  }
 
   function syncContractButtons(value) {
     $("contractType").value = value;
@@ -108,13 +120,11 @@
     $("gauge-formula").textContent =
       `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost} − 預計除息 ${v.expectedExDivPoints}`;
 
-    // -60 ~ +60 點對應 4% ~ 96%
     const clamped = Math.max(-60, Math.min(60, v.mispricing));
     const pct = 50 + (clamped / 60) * 46;
     const pin = $("gauge-pin");
     pin.style.left = `${pct}%`;
 
-    // 接近左右邊緣時調整標籤對齊，避免在 375px 手機上被截斷
     const lbl = $("gauge-pin-label");
     lbl.textContent = `市場 ${v.marketSpread}`;
     if (pct < 18) pin.style.transform = "translateX(-15%)";
@@ -230,7 +240,6 @@
     $("signal-label").textContent = r.signalLabel.replace(/^[🟢🟡🔴]\s*/, "");
     $("action-summary").textContent = r.actionSummary;
 
-    // 統計膠囊
     const counts = { block: 0, warn: 0, pass: 0 };
     r.checks.forEach((c) => counts[c.status]++);
     const heroCounts = $("hero-counts");
@@ -251,7 +260,6 @@
     const c = r.calendar;
     const s = r.sizing;
 
-    // 手機頂部即時迷你燈號列
     const mini = $("live-mini-bar");
     mini.className = `live-mini-bar ${sigCls}`;
     const diffWord = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
@@ -260,7 +268,6 @@
 
     renderGauge(v);
 
-    // 4 張指標卡
     $("m-theory").textContent = `${v.theoreticalSpread} 點`;
     $("m-theory-sub").textContent = `利息 +${v.fundingCost} − 除息 ${v.expectedExDivPoints}`;
 
@@ -327,8 +334,10 @@
     const status = $("data-status");
     if (!market) {
       box.textContent = "無法載入盤後資料，請手動輸入參數。";
-      status.textContent = "⚠️ 盤後資料載入失敗";
-      status.className = "data-status err";
+      if (!hasLiveQuote) {
+        status.textContent = "⚠️ 盤後資料載入失敗";
+        status.className = "data-status err";
+      }
       return;
     }
     const tx = market.tx || {};
@@ -354,8 +363,10 @@
       d.append(kk, vv);
       box.appendChild(d);
     }
-    status.textContent = `✅ 盤後資料 ${fmtD(tx.date)}`;
-    status.className = "data-status ok";
+    if (!hasLiveQuote) {
+      status.textContent = `✅ 盤後資料 ${fmtD(tx.date)}`;
+      status.className = "data-status ok";
+    }
   }
 
   function applyMarket() {
@@ -381,6 +392,126 @@
     renderMarket();
   }
 
+  // ---- 盤中即時報價（Cloudflare Worker -> 期交所 MIS）----
+  function setLiveStatus(msg, tone = "muted") {
+    const el = $("live-status-msg");
+    el.textContent = msg;
+    el.className = `live-status-msg ${tone}`;
+  }
+
+  function renderLiveBox(data) {
+    $("live-quote-box").classList.remove("hidden");
+    $("live-quote-name").textContent = `${data.spreadName || data.spreadSymbol}・${data.sessionLabel}`;
+    $("live-quote-time").textContent = `${data.date || ""} ${data.time || ""}`.trim();
+
+    const sp = data.spread || {};
+    $("lq-spread").textContent = sp.effectiveSpread != null ? `${sp.effectiveSpread} 點` : "--";
+    $("lq-spread-sub").textContent = `最新成交 ${sp.last ?? "--"}｜量 ${sp.volume ?? "--"}`;
+    $("lq-ba").textContent = `${sp.bid ?? "--"} / ${sp.ask ?? "--"}`;
+    $("lq-ba-sub").textContent = `口數 ${sp.bidSize ?? "-"} / ${sp.askSize ?? "-"}`;
+    $("lq-gap").textContent = sp.bidAskGap != null ? `${sp.bidAskGap} 點` : "--";
+    $("lq-legs").textContent = `${data.near?.last ?? "--"} / ${data.far?.last ?? "--"}`;
+  }
+
+  async function fetchLiveQuote({ silent = false } = {}) {
+    if (!liveApiUrl) {
+      if (!silent) {
+        $("live-api-panel").classList.remove("hidden");
+        setLiveStatus("請先填入 Cloudflare Worker 網址再抓取盤中報價。", "err");
+      }
+      return false;
+    }
+    if (isFetchingLive) return false;
+
+    isFetchingLive = true;
+    const btn = $("btn-fetch-live");
+    const prevText = btn.textContent;
+    if (!silent) btn.textContent = "抓取中...";
+
+    try {
+      const contract = $("contractType").value || "MTX";
+      const session = $("live-session").value || "auto";
+      const url = `${liveApiUrl}?contract=${encodeURIComponent(contract)}&session=${encodeURIComponent(session)}&_=${Date.now()}`;
+      const res = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      if (data.near?.last != null) {
+        $("indexLevel").value = Math.round(data.near.last);
+      } else if (data.spot != null) {
+        $("indexLevel").value = Math.round(data.spot);
+      }
+      if (data.spread?.effectiveSpread != null) {
+        $("marketSpread").value = data.spread.effectiveSpread;
+      }
+      if (data.spread?.bidAskGap != null) {
+        $("bidAskGap").value = data.spread.bidAskGap;
+      }
+      $("evalDatetime").value = "";
+
+      hasLiveQuote = true;
+      renderLiveBox(data);
+      const t = data.time || "--:--";
+      $("data-status").textContent = `⚡ 即時 ${t}（${data.sessionLabel}）`;
+      $("data-status").className = "data-status ok";
+      setLiveStatus(`已同步期交所 ${data.spreadSymbol} 即時報價（外資淨空單沿用盤後數字）`, "ok");
+      render();
+      return true;
+    } catch (err) {
+      setLiveStatus(`即時抓取失敗（原輸入保留不動）：${err.message || err}`, "err");
+      return false;
+    } finally {
+      isFetchingLive = false;
+      btn.textContent = prevText;
+    }
+  }
+
+  function stopLivePolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function startLivePolling() {
+    stopLivePolling();
+    pollTimer = setInterval(() => {
+      if (!$("chk-live-poll").checked || !liveApiUrl || document.hidden) return;
+      fetchLiveQuote({ silent: true });
+    }, POLL_INTERVAL_MS);
+  }
+
+  function initLiveConfig() {
+    const params = new URLSearchParams(window.location.search);
+    const paramApi = normalizeApiUrl(params.get("api"));
+    if (paramApi) {
+      try { localStorage.setItem(API_STORAGE_KEY, paramApi); } catch (_) {}
+    }
+    let storedApi = "";
+    let storedPoll = false;
+    try {
+      storedApi = normalizeApiUrl(localStorage.getItem(API_STORAGE_KEY));
+      storedPoll = localStorage.getItem(POLL_STORAGE_KEY) === "1";
+    } catch (_) {}
+
+    liveApiUrl = paramApi || storedApi || DEFAULT_LIVE_API_URL;
+    $("live-api-url").value = liveApiUrl;
+    $("chk-live-poll").checked = storedPoll;
+
+    if (liveApiUrl) {
+      setLiveStatus("已設定即時 API，點「⚡ 立即抓盤中」或開啟 15 秒自動更新。", "muted");
+    }
+
+    return {
+      shouldAutoFetch: Boolean(paramApi && (params.get("autolive") === "1" || paramApi)) || Boolean(storedPoll && liveApiUrl),
+    };
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     const saved = load();
     setForm(saved || BASE);
@@ -394,7 +525,59 @@
       btn.addEventListener("click", () => {
         syncContractButtons(btn.dataset.contract);
         render();
+        if (liveApiUrl && ($("chk-live-poll").checked || hasLiveQuote)) {
+          fetchLiveQuote({ silent: true });
+        }
       });
+    });
+
+    $("live-session").addEventListener("change", () => {
+      if (liveApiUrl && ($("chk-live-poll").checked || hasLiveQuote)) {
+        fetchLiveQuote({ silent: true });
+      }
+    });
+
+    $("btn-fetch-live").addEventListener("click", () => fetchLiveQuote({ silent: false }));
+    $("btn-toggle-api").addEventListener("click", () => {
+      $("live-api-panel").classList.toggle("hidden");
+    });
+    $("btn-save-api").addEventListener("click", async () => {
+      liveApiUrl = normalizeApiUrl($("live-api-url").value);
+      $("live-api-url").value = liveApiUrl;
+      try {
+        if (liveApiUrl) localStorage.setItem(API_STORAGE_KEY, liveApiUrl);
+        else localStorage.removeItem(API_STORAGE_KEY);
+      } catch (_) {}
+      if (!liveApiUrl) {
+        setLiveStatus("已清除 API 網址。", "muted");
+        return;
+      }
+      $("live-api-panel").classList.add("hidden");
+      await fetchLiveQuote({ silent: false });
+    });
+
+    $("chk-live-poll").addEventListener("change", () => {
+      const on = $("chk-live-poll").checked;
+      try { localStorage.setItem(POLL_STORAGE_KEY, on ? "1" : "0"); } catch (_) {}
+      if (on) {
+        if (!liveApiUrl) {
+          $("chk-live-poll").checked = false;
+          try { localStorage.setItem(POLL_STORAGE_KEY, "0"); } catch (_) {}
+          $("live-api-panel").classList.remove("hidden");
+          setLiveStatus("請先設定 Cloudflare Worker 網址，才能開啟 15 秒自動更新。", "err");
+          return;
+        }
+        fetchLiveQuote({ silent: false });
+        startLivePolling();
+      } else {
+        stopLivePolling();
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && $("chk-live-poll").checked && liveApiUrl) {
+        fetchLiveQuote({ silent: true });
+      }
     });
 
     document.querySelectorAll("[data-preset]").forEach((b) =>
@@ -418,9 +601,17 @@
       else render();
     });
 
+    const { shouldAutoFetch } = initLiveConfig();
     render();
     await fetchMarket();
     if (!saved && market) applyMarket();
     else render();
+
+    if (shouldAutoFetch) {
+      await fetchLiveQuote({ silent: false });
+    }
+    if ($("chk-live-poll").checked && liveApiUrl) {
+      startLivePolling();
+    }
   });
 })();

@@ -1,7 +1,7 @@
 # 專案規則
 
 ## 自動上傳 GitHub
-每次修改這個專案的檔案後，完成並通過驗證（如 `node --test tests/engine.test.cjs`）後，都要自動 commit 並推送到 GitHub，不用再問使用者：
+每次修改這個專案的檔案後，完成並通過驗證（如 `node --test tests/engine.test.cjs tests/worker.test.mjs`）後，都要自動 commit 並推送到 GitHub，不用再問使用者：
 
 ```powershell
 git add -A

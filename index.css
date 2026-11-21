@@ -371,7 +371,7 @@ body {
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.83rem; color: var(--muted); min-width: 0; }
 .field-tip { font-size: 0.74rem; color: var(--muted); opacity: 0.85; }
-input[type="number"], input[type="date"], input[type="datetime-local"], select {
+input[type="number"], input[type="date"], input[type="datetime-local"], input[type="url"], select {
   width: 100%;
   min-width: 0;
   min-height: 44px;
@@ -447,6 +447,90 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   cursor: pointer;
 }
 .chip:hover { border-color: var(--accent); }
+
+/* Live Intraday Card */
+.live-card { border-color: rgba(79, 195, 247, 0.45); }
+.live-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.live-header h2 { margin: 0; }
+.live-session-select {
+  width: auto !important;
+  min-height: 36px !important;
+  padding: 5px 10px !important;
+  font-size: 0.84rem !important;
+}
+.live-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.live-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.live-toggle input { width: 18px; height: 18px; margin: 0; }
+.live-quote-box {
+  margin-top: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.live-quote-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.live-quote-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.live-quote-grid .kv {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.live-quote-grid .k { font-size: 0.74rem; color: var(--muted); }
+.live-quote-grid .v { font-size: 1.02rem; font-weight: 700; }
+.live-quote-grid .s { font-size: 0.74rem; color: var(--muted); margin-top: 1px; }
+.live-status-msg { margin-top: 8px; font-size: 0.8rem; }
+.live-status-msg.ok { color: var(--green); }
+.live-status-msg.err { color: var(--red); }
+.live-api-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.live-api-panel code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+}
 
 /* Market Summary */
 .market-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 0.86rem; }

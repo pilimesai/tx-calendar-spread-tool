@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=2" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=2" />
-  <link rel="manifest" href="manifest.json?v=2" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=3" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=3" />
+  <link rel="manifest" href="manifest.json?v=3" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=2" />
+  <link rel="stylesheet" href="index.css?v=3" />
 </head>
 <body>
   <header class="app-header">
@@ -122,6 +122,66 @@
       <div id="sim-banner" class="sim-banner hidden">
         <span id="sim-banner-text">🧪 目前為模擬情境</span>
         <button type="button" class="btn-sim-exit" id="btn-exit-sim">切回今日實況</button>
+      </div>
+
+      <!-- 盤中即時報價卡片 -->
+      <div class="card live-card">
+        <div class="live-header">
+          <h2>⚡ 盤中即時報價（期交所）</h2>
+          <select id="live-session" class="live-session-select" aria-label="盤別">
+            <option value="auto">自動盤別</option>
+            <option value="day">日盤</option>
+            <option value="night">夜盤</option>
+          </select>
+        </div>
+
+        <div class="live-controls">
+          <label class="live-toggle">
+            <input type="checkbox" id="chk-live-poll" />
+            <span>⚡ 盤中即時 (15s)</span>
+          </label>
+          <button type="button" class="btn primary" id="btn-fetch-live">⚡ 立即抓盤中</button>
+          <button type="button" class="btn" id="btn-toggle-api">⚙️ 設定 API</button>
+        </div>
+
+        <div id="live-quote-box" class="live-quote-box hidden">
+          <div class="live-quote-head">
+            <span id="live-quote-name">--</span>
+            <span id="live-quote-time">--</span>
+          </div>
+          <div class="live-quote-grid">
+            <div class="kv">
+              <div class="k">跨月報價</div>
+              <div class="v" id="lq-spread">--</div>
+              <div class="s" id="lq-spread-sub">--</div>
+            </div>
+            <div class="kv">
+              <div class="k">委買 / 委賣</div>
+              <div class="v" id="lq-ba">--</div>
+              <div class="s" id="lq-ba-sub">--</div>
+            </div>
+            <div class="kv">
+              <div class="k">即時五檔價差</div>
+              <div class="v" id="lq-gap">--</div>
+            </div>
+            <div class="kv">
+              <div class="k">近月 / 遠月</div>
+              <div class="v" id="lq-legs">--</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="live-status-msg" class="live-status-msg muted">尚未設定盤中 API，可先點「⚙️ 設定 API」或直接使用下方盤後資料。</div>
+
+        <div id="live-api-panel" class="live-api-panel hidden">
+          <label>Cloudflare Worker 網址
+            <input type="url" inputmode="url" id="live-api-url" placeholder="https://tx-spread-live-proxy.<你的帳號>.workers.dev" />
+          </label>
+          <div class="btn-row">
+            <button type="button" class="btn primary" id="btn-save-api">儲存並抓取</button>
+          </div>
+          <p class="hint">需先部署 <code>worker/taifex-proxy.js</code> 到免費 Cloudflare Worker（約 2 分鐘），網址會自動儲存在這支手機。</p>
+        </div>
       </div>
 
       <div class="card market-card">
@@ -267,7 +327,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <script src="engine.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
