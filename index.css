@@ -492,23 +492,6 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
 .btn:active { transform: scale(0.98); }
 
-/* Presets */
-.preset-card { padding: 12px 14px; }
-.preset-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.preset-title { font-size: 0.84rem; color: var(--muted); font-weight: 600; }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip {
-  min-height: 36px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-.chip:hover { border-color: var(--accent); }
-
 /* Live Intraday Card */
 .live-card { border-color: rgba(79, 195, 247, 0.45); }
 .live-header {

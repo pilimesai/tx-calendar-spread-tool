@@ -27,29 +27,6 @@
     targetExitSpread: "",
   };
 
-  const PRESETS = {
-    nov_actual: Object.assign({}, BASE, {
-      indexLevel: 44136, expectedExDivPoints: 0, marketSpread: 14, ma10Spread: 90.1,
-      trustNetLong: 101870, foreignNetShort: 104271, taiex5dChangePct: 3.0, crashWeekLocked: false, bidAskGap: 2,
-      evalDatetime: "2026-11-11T10:00", contractType: "MTX", contracts: 2, targetExitSpread: 96,
-    }),
-    july_discount: Object.assign({}, BASE, {
-      annualRatePct: 1.83, expectedExDivPoints: 250, marketSpread: -240, ma10Spread: -210,
-      trustNetLong: 68000, foreignNetShort: 22000, taiex5dChangePct: 0.5, crashWeekLocked: false,
-      evalDatetime: "2026-07-09T10:00", contractType: "TX", contracts: 2, targetExitSpread: -170,
-    }),
-    aug_overheated: Object.assign({}, BASE, {
-      indexLevel: 44600, expectedExDivPoints: 85, marketSpread: 157, ma10Spread: 130.6,
-      trustNetLong: 82383, foreignNetShort: 86633, taiex5dChangePct: 2.0, crashWeekLocked: false, bidAskGap: 2,
-      evalDatetime: "2026-08-12T10:00", contractType: "MTX", targetExitSpread: "",
-    }),
-    apr_crash: Object.assign({}, BASE, {
-      indexLevel: 17392, expectedExDivPoints: 3, marketSpread: -7, ma10Spread: 15.8,
-      trustNetLong: 27325, foreignNetShort: 27871, taiex5dChangePct: -16.0, crashWeekLocked: true, bidAskGap: 2,
-      evalDatetime: "2025-04-09T10:00", contractType: "MTX", targetExitSpread: "",
-    }),
-  };
-
   const FIELDS = Object.keys(BASE);
   const NUMERIC = new Set([
     "indexLevel", "annualRatePct", "marketSpread",
@@ -61,7 +38,6 @@
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
 
   let market = null;
-  let presetExDivPoints = null;
   let liveApiUrl = "";
   let pollTimer = null;
   let isFetchingLive = false;
@@ -314,7 +290,7 @@
       nearSettlementOverride: inp.nearSettlementOverride,
     }).calendar;
     const autoEx = computeAutoExDiv(cal.nearSettlement, cal.farSettlement);
-    inp.expectedExDivPoints = presetExDivPoints !== null ? presetExDivPoints : autoEx.totalPoints;
+    inp.expectedExDivPoints = autoEx.totalPoints;
     const r = evaluateEntry(inp);
     save();
     renderSimAndAdvanced(inp);
@@ -420,16 +396,13 @@
     const pill = $("exdiv-count");
     box.innerHTML = "";
     if (!market || !Array.isArray(market.exdiv)) {
-      pill.textContent = presetExDivPoints !== null ? `模擬 -${presetExDivPoints} 點` : "-- 檔";
+      pill.textContent = "-- 檔";
       win.textContent = "尚無除權息預告資料。";
       return;
     }
     const info = autoEx || computeAutoExDiv(nearIso, farIso);
     const { start, rows, totalPoints, constituentCount, pendingConstituents } = info;
-    pill.textContent =
-      presetExDivPoints !== null
-        ? `模擬 -${presetExDivPoints} 點`
-        : `${rows.length} 檔｜自動 -${totalPoints} 點`;
+    pill.textContent = `${rows.length} 檔｜自動 -${totalPoints} 點`;
     win.textContent =
       `區間：${start} ～ ${farIso}（證交所目前已公告者；大盤成份股 ${constituentCount} 檔` +
       (pendingConstituents > 0 ? `，另有 ${pendingConstituents} 檔金額待公告` : "") +
@@ -534,7 +507,6 @@
 
   function applyMarket() {
     if (!market) return;
-    presetExDivPoints = null;
     const tx = market.tx || {};
     const fo = market.foreign || {};
     const tr = market.trust || {};
@@ -636,7 +608,6 @@
       if (data.spread?.bidAskGap != null) {
         $("bidAskGap").value = data.spread.bidAskGap;
       }
-      presetExDivPoints = null;
       $("evalDatetime").value = "";
 
       hasLiveQuote = true;
@@ -786,31 +757,12 @@
       }
     });
 
-    document.querySelectorAll("[data-preset]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const key = b.dataset.preset;
-        if (key === "reset") {
-          checkedSteps.clear();
-          presetExDivPoints = null;
-        } else {
-          presetExDivPoints = PRESETS[key].expectedExDivPoints ?? 0;
-        }
-        setForm(
-          key === "reset"
-            ? Object.assign({}, BASE, { annualRatePct: getDefaultAnnualRate() })
-            : PRESETS[key]
-        );
-        render();
-      })
-    );
-
     $("btn-apply-market").addEventListener("click", applyMarket);
     $("btn-refresh-market").addEventListener("click", async () => {
       await fetchMarket();
       render();
     });
     $("btn-exit-sim").addEventListener("click", async () => {
-      presetExDivPoints = null;
       $("evalDatetime").value = "";
       $("nearSettlementOverride").value = "";
       if (market) applyMarket();
