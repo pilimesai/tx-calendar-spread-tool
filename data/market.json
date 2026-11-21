@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-21T23:24:28+08:00",
+ "generated_at": "2026-11-22T00:00:17+08:00",
  "errors": [],
  "tx": {
   "date": "20261120",
@@ -265,6 +265,28 @@
   "close": 36033.29,
   "base_date": "2026-11-13",
   "base_close": 43675.12,
-  "change_5d_pct": -17.5
+  "change_5d_pct": -17.5,
+  "recent_5d_changes": [
+   {
+    "date": "2026-11-16",
+    "change_5d_pct": -1.49
+   },
+   {
+    "date": "2026-11-17",
+    "change_5d_pct": -6.13
+   },
+   {
+    "date": "2026-11-18",
+    "change_5d_pct": -9.18
+   },
+   {
+    "date": "2026-11-19",
+    "change_5d_pct": -10.83
+   },
+   {
+    "date": "2026-11-20",
+    "change_5d_pct": -17.5
+   }
+  ]
  }
 }

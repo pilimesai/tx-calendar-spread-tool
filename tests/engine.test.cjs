@@ -322,3 +322,104 @@ test("除權降口：6 月僅 1 口大台提示降規格改做小台，非高峰
   assert.equal(rNov.sizing.recommendedContracts, 4);
   assert.equal(rNov.sizing.sizeCutHint, null);
 });
+
+test("崩盤週整月鎖定：2025/04 結算週內曾跌逾 5%，即使 T-2 轉正仍鎖定紅燈", () => {
+  const r = evaluateEntry({
+    indexLevel: 19513,
+    annualRatePct: 1.6,
+    expectedExDivPoints: 3,
+    marketSpread: -23,
+    ma10Spread: 5.3,
+    trustNetLong: 27325,
+    foreignNetShort: 27871,
+    taiex5dChangePct: 1.5,
+    crashWeekLocked: true,
+    bidAskGap: 2,
+    evalDatetime: "2025-04-14T10:00",
+    contracts: 2,
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.signal, "RED");
+  assert.equal(r.marketRisk.status, "block");
+  assert.equal(r.marketRisk.crashWeekLocked, true);
+  assert.equal(byId.marketCrash.badge, "崩盤月鎖定");
+  assert.equal(r.sizing.scaleUpTriggered, false);
+});
+
+test("超值加碼：2026/11 報價低於 min(理論價, MA10) → 2 口觸發放大至 4 口", () => {
+  const r = evaluateEntry({
+    indexLevel: 44136,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 24,
+    ma10Spread: 84.8,
+    trustNetLong: 101870,
+    foreignNetShort: 104271,
+    taiex5dChangePct: 3.0,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-11T10:00",
+    contractType: "MTX",
+    contracts: 2,
+    targetExitSpread: 110,
+  });
+  assert.equal(r.signal, "GREEN");
+  assert.equal(r.sizing.recommendedContracts, 2);
+  assert.equal(r.sizing.scaleUpMaxContracts, 4);
+  assert.equal(r.sizing.scaleUpTriggered, true);
+  assert.equal(r.sizing.scaleUpProfitTwd, r.sizing.expectedProfitTwd * 2);
+  assert.ok(r.checklist.some((item) => item.includes("超值加碼確認")));
+});
+
+test("超值加碼預掛線：綠燈回檔買點但高於理論價 → 不觸發加碼但顯示預掛線", () => {
+  const r = evaluateEntry({
+    indexLevel: 34000,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 18,
+    marketSpread: 97,
+    ma10Spread: 100.1,
+    trustNetLong: 36571,
+    foreignNetShort: 40958,
+    bidAskGap: 2,
+    evalDatetime: "2026-03-11T10:00",
+    contractType: "MTX",
+    contracts: 2,
+  });
+  assert.equal(r.signal, "GREEN");
+  assert.equal(r.sizing.scaleUpTriggered, false);
+  assert.ok(r.sizing.scaleUpHint.includes("預掛加碼線"));
+});
+
+test("除權高峰超值加碼維持減半上限：2 口降 1 口可放大至 2 口，1 口不放大", () => {
+  const r2 = evaluateEntry({
+    indexLevel: 23000,
+    annualRatePct: 1.826,
+    expectedExDivPoints: 250,
+    marketSpread: -240,
+    ma10Spread: -210,
+    foreignNetShort: 22000,
+    bidAskGap: 2,
+    evalDatetime: "2026-07-09T10:00",
+    contractType: "TX",
+    contracts: 2,
+  });
+  assert.equal(r2.signal, "GREEN");
+  assert.equal(r2.sizing.recommendedContracts, 1);
+  assert.equal(r2.sizing.scaleUpMaxContracts, 2);
+  assert.equal(r2.sizing.scaleUpTriggered, true);
+
+  const r1 = evaluateEntry({
+    indexLevel: 23000,
+    annualRatePct: 1.826,
+    expectedExDivPoints: 250,
+    marketSpread: -240,
+    ma10Spread: -210,
+    foreignNetShort: 22000,
+    bidAskGap: 2,
+    evalDatetime: "2026-07-09T10:00",
+    contractType: "TX",
+    contracts: 1,
+  });
+  assert.equal(r1.sizing.recommendedContracts, 1);
+  assert.equal(r1.sizing.scaleUpMaxContracts, 1);
+  assert.equal(r1.sizing.scaleUpTriggered, false);
+});

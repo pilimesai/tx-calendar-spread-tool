@@ -77,6 +77,7 @@
     foreignNetShort: 30000,
     trustNetLong: null,
     taiex5dChangePct: null,
+    crashWeekLocked: false,
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -198,23 +199,32 @@
     const taiex5dChangePct = hasRet5 ? r2(rawRet5) : null;
 
     let crashStatus, crashBadge, crashMetric, crashMsg;
-    if (!hasRet5) {
-      crashStatus = "pass";
-      crashBadge = "未提供";
-      crashMetric = "未填寫";
-      crashMsg = "未填入大盤近 5 日漲跌幅，預設無系統性急殺異常（建議由盤後資料自動帶入）。";
-    } else if (taiex5dChangePct <= -5) {
+    if (hasRet5 && taiex5dChangePct <= -5) {
       crashStatus = "block";
       crashBadge = "崩盤急殺";
       crashMetric = `${fmt(taiex5dChangePct)}%`;
       crashMsg = `加權指數近 5 個交易日暴跌 ${fmt(Math.abs(taiex5dChangePct))}%（已達 5% 崩盤急殺紅線），正二 ETF 恐因淨值重挫被迫減碼多單且遠月賣壓失控，就算價差折價也不宜接刀，建議直接跳過本月。`;
       pushFactor("block", crashMsg);
-    } else if (taiex5dChangePct <= -3) {
+    } else if (inp.crashWeekLocked) {
+      crashStatus = "block";
+      crashBadge = "崩盤月鎖定";
+      crashMetric = hasRet5
+        ? `${taiex5dChangePct >= 0 ? "+" : ""}${fmt(taiex5dChangePct)}%（週內≤-5%）`
+        : "週內曾≤-5%";
+      crashMsg =
+        "本結算週（T-5 起）曾觸發大盤 5 日暴跌 5% 以上紅線，為避免股災短暫反彈後回頭接刀重傷（如 2025/04），已自動鎖定本月停手，切勿進場或加碼。";
+      pushFactor("block", crashMsg);
+    } else if (hasRet5 && taiex5dChangePct <= -3) {
       crashStatus = "warn";
       crashBadge = "急殺警戒";
       crashMetric = `${fmt(taiex5dChangePct)}%`;
       crashMsg = `加權指數近 5 個交易日急跌 ${fmt(Math.abs(taiex5dChangePct))}%（超過 3% 急殺警戒線），恐壓抑正二轉倉買盤並放大遠月賣壓，已自動降燈警戒，建議觀望或等大盤止穩再進場。`;
       pushFactor("warn", crashMsg);
+    } else if (!hasRet5) {
+      crashStatus = "pass";
+      crashBadge = "未提供";
+      crashMetric = "未填寫";
+      crashMsg = "未填入大盤近 5 日漲跌幅，預設無系統性急殺異常（建議由盤後資料自動帶入）。";
     } else {
       crashStatus = "pass";
       crashBadge = "波動正常";
@@ -468,11 +478,29 @@
     const recommendedStress30 = Math.round(30 * pv * recommendedContracts);
     const recommendedStress50 = Math.round(50 * pv * recommendedContracts);
 
+    const scaleUpFloor = hasMa10 ? r2(Math.min(theoreticalSpread, ma10Spread)) : theoreticalSpread;
+    const scaleUpFloorLabel = hasMa10 ? "min(理論價, MA10)" : "理論價";
+    const scaleUpMaxContracts = isExDivPeak ? Math.max(1, inp.contracts) : inp.contracts * 2;
+    const canScaleUp = scaleUpMaxContracts > recommendedContracts;
+    const scaleUpTriggered = signal === "GREEN" && canScaleUp && inp.marketSpread <= scaleUpFloor;
+    const scaleUpProfitTwd = Math.round(expectedGainPoints * pv * scaleUpMaxContracts);
+    const scaleUpStress30Twd = Math.round(30 * pv * scaleUpMaxContracts);
+    const scaleUpStress50Twd = Math.round(50 * pv * scaleUpMaxContracts);
+    let scaleUpHint = null;
+    if (scaleUpTriggered) {
+      scaleUpHint = `🔥 觸發超值加碼：目前報價（${fmt(inp.marketSpread)}）≤ ${scaleUpFloorLabel}（${fmt(scaleUpFloor)}），可由 ${recommendedContracts} 口放大至 ${scaleUpMaxContracts} 口（預估損益 ${scaleUpProfitTwd >= 0 ? "+" : "-"}NT$ ${fmtInt(Math.abs(scaleUpProfitTwd))}，50 點洗盤緩衝約 NT$ ${fmtInt(scaleUpStress50Twd)}）`;
+    } else if (signal === "GREEN" && canScaleUp) {
+      scaleUpHint = `📌 預掛加碼線：先買 ${recommendedContracts} 口；盤中若壓回 ≤ ${fmt(scaleUpFloor)}（${scaleUpFloorLabel}）可加碼放大至 ${scaleUpMaxContracts} 口`;
+    }
+
     const checklist = [
       `使用券商軟體「台指期價差（複式單）」介面，選擇 ${inp.contractType} 近月／遠月組合，切勿分開單邊下單。`,
       "建倉方向選擇「買進」價差單（系統同步成交：賣出近月 ＋ 買進遠月），委託條件限用「ROD 限價單」。",
       ...(isExDivPeak
         ? [`⚠️ 除權息高峰降口確認：${sizeCutHint}，避免單月除息估算誤差放大波動。`]
+        : []),
+      ...(scaleUpTriggered
+        ? [`🔥 超值加碼確認：報價已 ≤ ${fmt(scaleUpFloor)}，若放大至 ${scaleUpMaxContracts} 口，請確認帳上預留 50 點洗盤緩衝約 NT$ ${fmtInt(scaleUpStress50Twd)}${isExDivPeak ? "（已套用除權高峰減半上限）" : ""}。`]
         : []),
       `帳上除價差減收保證金外，至少多預留 1～2 倍緩衝資金（預估盤中 30～50 點反向洗盤波動約 NT$ ${fmtInt(stress30)} ～ NT$ ${fmtInt(stress50)}）。`,
       "結算前一天至結算日早盤正二轉倉推升時，分批掛「賣出」價差限價單停利。",
@@ -497,6 +525,7 @@
       },
       marketRisk: {
         taiex5dChangePct,
+        crashWeekLocked: Boolean(inp.crashWeekLocked),
         status: crashStatus,
         badge: crashBadge,
       },
@@ -531,6 +560,13 @@
         recommendedContracts,
         suggestSmallerContract,
         sizeCutHint,
+        scaleUpFloor,
+        scaleUpMaxContracts,
+        scaleUpTriggered,
+        scaleUpProfitTwd,
+        scaleUpStress30Twd,
+        scaleUpStress50Twd,
+        scaleUpHint,
         suggestedExitSpread: suggestedExit,
         expectedGainPoints,
         expectedProfitTwd,

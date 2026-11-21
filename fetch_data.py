@@ -262,12 +262,22 @@ def fetch_taiex_5d() -> dict:
     latest_date, latest_close = items[-1]
     base_date, base_close = items[-6]
     change_5d_pct = round((latest_close / base_close - 1) * 100, 2)
+    recent_5d_changes = []
+    start_idx = max(5, len(items) - 5)
+    for idx in range(start_idx, len(items)):
+        d_cur, c_cur = items[idx]
+        _, c_base = items[idx - 5]
+        recent_5d_changes.append({
+            "date": d_cur,
+            "change_5d_pct": round((c_cur / c_base - 1) * 100, 2),
+        })
     return {
         "date": latest_date,
         "close": round(latest_close, 2),
         "base_date": base_date,
         "base_close": round(base_close, 2),
         "change_5d_pct": change_5d_pct,
+        "recent_5d_changes": recent_5d_changes,
     }
 
 

@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=9" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=9" />
-  <link rel="manifest" href="manifest.json?v=9" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=10" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=10" />
+  <link rel="manifest" href="manifest.json?v=10" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=9" />
+  <link rel="stylesheet" href="index.css?v=10" />
 </head>
 <body>
   <header class="app-header">
@@ -55,6 +55,7 @@
           <div class="hero-counts" id="hero-counts"></div>
         </div>
         <div class="signal-desc" id="action-summary"></div>
+        <div id="scale-up-banner" class="scale-up-banner hidden"></div>
       </div>
 
       <!-- 視覺化價差溫度計 -->
@@ -243,6 +244,10 @@
               <span class="field-tip">盤後／盤中自動帶入</span>
             </label>
           </div>
+          <label class="check crash-lock-check">
+            <input type="checkbox" id="crashWeekLocked" />
+            <span>本結算週（T-5 起）曾觸發 -5% 崩盤紅燈（整月停手鎖定）</span>
+          </label>
 
           <div class="divider"></div>
           <div class="sub-heading">下單規格與口數</div>
@@ -336,14 +341,14 @@
             • <strong>價值折價買點</strong>：報價低於理論價，具絕對安全邊際。<br />
             • <strong>回檔買點</strong>：正價差常態下若壓回至「近 10 日均價差（MA10）」以下，代表短線沒追高，也屬於安全卡位區。
           </p>
-          <p><strong>2. 多空籌碼拔河（投信多 vs 外資空）與除權降口</strong><br />
-            正二 ETF 轉倉主力反映在「投信淨多單」，當 <strong>投信淨多 ÷ 外資淨空 ≥ 0.85</strong> 時買盤足以抗衡；另於 <strong>6～7 月或預計除息 ≥ 150 點高峰</strong>，自動提醒口數減半或降規格以控制除息估算波動。
+          <p><strong>2. 多空籌碼拔河（投信多 vs 外資空）、除權降口與超值加碼</strong><br />
+            正二 ETF 轉倉主力反映在「投信淨多單」，當 <strong>投信淨多 ÷ 外資淨空 ≥ 0.85</strong> 時買盤足以抗衡；於 <strong>6～7 月或預計除息 ≥ 150 點高峰</strong> 自動建議口數減半。綠燈且報價壓回 <strong>≤ min(理論價, MA10)</strong> 時提醒可放大 <strong>2 倍口數</strong>（除權高峰仍維持減半上限，最多回到原設定口數）。
           </p>
           <p><strong>3. 絕對不能碰的 4 個風控紅線</strong><br />
             ① <strong>結算日 13:15 後</strong>：五檔稀疏滑價大，13:30 未平倉會留下純遠月多單裸露風險。<br />
             ② <strong>短線過熱追高</strong>：同時高於理論價且超漲近 10 日均價差（超過動態過熱上限），或<strong>五檔跳空 ≥ 15 點</strong>。<br />
             ③ <strong>外資籌碼壓制</strong>：投信買盤顯著不敵外資空單且缺乏折價保護。<br />
-            ④ <strong>大盤近 5 日急殺</strong>：加權指數近 5 日跌逾 <strong>3%</strong> 自動降為黃燈警戒、跌逾 <strong>5%</strong> 直接亮紅燈，避免正二淨值重挫被迫減碼時盲目接刀。
+            ④ <strong>大盤近 5 日急殺與崩盤月鎖定</strong>：加權指數近 5 日跌逾 <strong>3%</strong> 自動降為黃燈警戒、跌逾 <strong>5%</strong> 直接亮紅燈，且<strong>本結算週（T-5 起）曾觸發 -5% 紅燈</strong>即整月鎖定停手，避免股災短暫反彈後回頭接刀。
           </p>
         </div>
       </details>
@@ -352,7 +357,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="engine.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

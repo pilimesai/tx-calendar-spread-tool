@@ -18,6 +18,7 @@
     foreignNetShort: 30000,
     trustNetLong: "",
     taiex5dChangePct: "",
+    crashWeekLocked: false,
     bidAskGap: 2,
     exDivDatesConfirmed: true,
     evalDatetime: "",
@@ -30,22 +31,22 @@
   const PRESETS = {
     nov_actual: Object.assign({}, BASE, {
       indexLevel: 44136, expectedExDivPoints: 0, marketSpread: 14, ma10Spread: 90.1,
-      trustNetLong: 101870, foreignNetShort: 104271, taiex5dChangePct: 3.0, bidAskGap: 2,
-      evalDatetime: "2026-11-11T10:00", contractType: "MTX", targetExitSpread: 96,
+      trustNetLong: 101870, foreignNetShort: 104271, taiex5dChangePct: 3.0, crashWeekLocked: false, bidAskGap: 2,
+      evalDatetime: "2026-11-11T10:00", contractType: "MTX", contracts: 2, targetExitSpread: 96,
     }),
     july_discount: Object.assign({}, BASE, {
       annualRatePct: 1.83, expectedExDivPoints: 250, marketSpread: -240, ma10Spread: -210,
-      trustNetLong: 68000, foreignNetShort: 22000, taiex5dChangePct: 0.5,
+      trustNetLong: 68000, foreignNetShort: 22000, taiex5dChangePct: 0.5, crashWeekLocked: false,
       evalDatetime: "2026-07-09T10:00", contractType: "TX", contracts: 2, targetExitSpread: -170,
     }),
     aug_overheated: Object.assign({}, BASE, {
       indexLevel: 44600, expectedExDivPoints: 85, marketSpread: 157, ma10Spread: 130.6,
-      trustNetLong: 82383, foreignNetShort: 86633, taiex5dChangePct: 2.0, bidAskGap: 2,
+      trustNetLong: 82383, foreignNetShort: 86633, taiex5dChangePct: 2.0, crashWeekLocked: false, bidAskGap: 2,
       evalDatetime: "2026-08-12T10:00", contractType: "MTX", targetExitSpread: "",
     }),
     apr_crash: Object.assign({}, BASE, {
       indexLevel: 17392, expectedExDivPoints: 3, marketSpread: -7, ma10Spread: 15.8,
-      trustNetLong: 27325, foreignNetShort: 27871, taiex5dChangePct: -16.0, bidAskGap: 2,
+      trustNetLong: 27325, foreignNetShort: 27871, taiex5dChangePct: -16.0, crashWeekLocked: true, bidAskGap: 2,
       evalDatetime: "2025-04-09T10:00", contractType: "MTX", targetExitSpread: "",
     }),
   };
@@ -323,7 +324,17 @@
           ? `貴了 ${v.mispricing} 點`
           : `便宜 ${v.discountPoints} 點`;
     const dayWord = c.isSettlementDay ? "今日結算" : `剩 ${c.tradingDaysLeft} 交易日`;
-    $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}`;
+    const scaleSuffix = s.scaleUpTriggered ? ` ・ 🔥可放大${s.scaleUpMaxContracts}口` : "";
+    $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}${scaleSuffix}`;
+
+    const scaleBanner = $("scale-up-banner");
+    if (s.scaleUpHint) {
+      scaleBanner.textContent = s.scaleUpHint;
+      scaleBanner.className = `scale-up-banner ${s.scaleUpTriggered ? "active" : "standby"}`;
+    } else {
+      scaleBanner.textContent = "";
+      scaleBanner.className = "scale-up-banner hidden";
+    }
 
     renderGauge(v, c);
 
@@ -356,13 +367,16 @@
     const p = $("m-profit");
     p.textContent = s.expectedProfitTwd >= 0 ? `預計賺 ${money(s.expectedProfitTwd)}` : `預估虧 ${money(s.expectedProfitTwd)}`;
     p.className = `m-value ${s.expectedProfitTwd >= 0 ? "pos" : "neg"}`;
+    const scalePrefix = s.scaleUpTriggered
+      ? `🔥 加碼 ${s.scaleUpMaxContracts} 口預估 ${money(s.scaleUpProfitTwd)}｜`
+      : "";
     const profitPrefix = s.exDivSizeCut
       ? (s.contracts >= 2
         ? `⚠️ 降口 ${s.recommendedContracts} 口預估 ${money(s.recommendedProfitTwd)}｜`
         : `⚠️ ${s.sizeCutHint}｜`)
       : "";
     $("m-profit-sub").textContent =
-      `${profitPrefix}目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
+      `${scalePrefix || profitPrefix}目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
 
     renderChecks(r.checks);
     renderChecklist(r.checklist);
@@ -461,6 +475,15 @@
     }
   }
 
+  function detectCrashWeekLocked(marketObj) {
+    const seq = marketObj?.taiex?.recent_5d_changes;
+    if (!Array.isArray(seq) || !seq.length) return false;
+    const evalCal = evaluateEntry({ evalDatetime: "" }).calendar;
+    if (evalCal.tradingDaysLeft < 2 || evalCal.tradingDaysLeft > 5) return false;
+    const windowLen = 6 - evalCal.tradingDaysLeft;
+    return seq.slice(-windowLen).some((x) => x && typeof x.change_5d_pct === "number" && x.change_5d_pct <= -5);
+  }
+
   function applyMarket() {
     if (!market) return;
     const tx = market.tx || {};
@@ -472,6 +495,7 @@
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
     if (tr.net_long != null) $("trustNetLong").value = tr.net_long;
     if (market.taiex?.change_5d_pct != null) $("taiex5dChangePct").value = market.taiex.change_5d_pct;
+    $("crashWeekLocked").checked = detectCrashWeekLocked(market);
     if (market.rate?.annual_rate_pct != null) $("annualRatePct").value = market.rate.annual_rate_pct;
     $("evalDatetime").value = "";
     $("nearSettlementOverride").value = "";
@@ -749,6 +773,9 @@
       }
       if (saved && saved.taiex5dChangePct === undefined && market?.taiex?.change_5d_pct != null) {
         $("taiex5dChangePct").value = market.taiex.change_5d_pct;
+      }
+      if (saved && saved.crashWeekLocked === undefined && market) {
+        $("crashWeekLocked").checked = detectCrashWeekLocked(market);
       }
       render();
     }
