@@ -6,6 +6,7 @@
 - 期交所 OpenAPI：台指期（TX）各月份結算價 → 近／遠月價差
 - 期交所歷史下載（futDataDown）：近 10 個交易日近遠月價差 → MA10
 - 期交所 OpenAPI：三大法人台指期未平倉 → 投信淨多單、外資淨空單
+- 銀行公會 TAIBOR：1 個月期定盤利率 → 無風險短期年利率
 - 證交所：除權除息預告表（TWT48U）
 """
 
@@ -18,6 +19,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +30,8 @@ UA = {"User-Agent": "Mozilla/5.0 (tx-calendar-spread-tool)", "Accept": "applicat
 TAIFEX_FUT = "https://openapi.taifex.com.tw/v1/DailyMarketReportFut"
 TAIFEX_INST = "https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate"
 TAIFEX_FUT_CSV = "https://www.taifex.com.tw/cht/3/futDataDown"
+TAIBOR_DAILY_INDEX = "https://www.ba.org.tw/taiborDaily/index"
+TAIBOR_DOWNLOAD_BASE = "https://www.ba.org.tw/taiborDaily/DownloadAll?id="
 TWSE_EXDIV = "https://www.twse.com.tw/rwd/zh/exRight/TWT48U?response=json"
 
 
@@ -150,6 +154,77 @@ def fetch_institutional() -> tuple[dict, dict]:
     return foreign, trust
 
 
+def parse_taibor_zip(raw_bytes: bytes) -> dict:
+    """從銀行公會 TAIBOR ZIP 檔內解析最新一筆 1 個月期定盤利率。"""
+    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+        for name in zf.namelist():
+            raw = zf.read(name)
+            txt = None
+            for enc in ("big5", "utf-8-sig"):
+                try:
+                    txt = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if txt is None:
+                txt = raw.decode("big5", errors="ignore")
+
+            rows = list(csv.reader(io.StringIO(txt)))
+            header_idx = None
+            date_col = None
+            m1_col = None
+            for idx, row in enumerate(rows):
+                cells = [c.strip() for c in row]
+                if "日期" in cells and "一個月" in cells:
+                    header_idx = idx
+                    date_col = cells.index("日期")
+                    m1_col = cells.index("一個月")
+                    break
+
+            if header_idx is None:
+                continue
+
+            for row in rows[header_idx + 1:]:
+                if len(row) <= max(date_col, m1_col):
+                    continue
+                date_str = row[date_col].strip()
+                rate_val = to_num(row[m1_col])
+                if not re.fullmatch(r"\d{2}[A-Za-z]{3}\d{2}", date_str) or rate_val is None:
+                    continue
+                dt_iso = datetime.strptime(date_str, "%d%b%y").strftime("%Y-%m-%d")
+                m1_rate = round(rate_val, 3)
+                return {
+                    "date": dt_iso,
+                    "source": "銀行公會 TAIBOR 1個月期",
+                    "taibor_1m": m1_rate,
+                    "annual_rate_pct": m1_rate,
+                }
+
+    raise RuntimeError("無法從銀行公會 TAIBOR 檔案解析一個月期利率")
+
+
+def fetch_taibor_1m() -> dict:
+    """抓取銀行公會最新交易日 TAIBOR 1 個月期公開短期利率。"""
+    req = urllib.request.Request(
+        TAIBOR_DAILY_INDEX,
+        headers={"User-Agent": UA["User-Agent"], "Accept": "text/html,application/xhtml+xml"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    m = re.search(r"/taiborDaily/DownloadAll\?id=(\d+)", html)
+    if not m:
+        raise RuntimeError("銀行公會網頁找不到最新 TAIBOR 下載連結")
+
+    dl_req = urllib.request.Request(
+        TAIBOR_DOWNLOAD_BASE + m.group(1),
+        headers={"User-Agent": UA["User-Agent"]},
+    )
+    with urllib.request.urlopen(dl_req, timeout=30) as resp:
+        raw_bytes = resp.read()
+    return parse_taibor_zip(raw_bytes)
+
+
 def roc_to_iso(s: str) -> str | None:
     m = re.match(r"(\d+)年(\d+)月(\d+)日", s or "")
     if not m:
@@ -216,6 +291,13 @@ def main() -> int:
             result["trust"] = old["trust"]
 
     try:
+        result["rate"] = fetch_taibor_1m()
+    except Exception as exc:
+        result["errors"].append(f"rate: {exc}")
+        if "rate" in old:
+            result["rate"] = old["rate"]
+
+    try:
         result["exdiv"] = fetch_exdiv()
     except Exception as exc:
         result["errors"].append(f"exdiv: {exc}")
@@ -224,8 +306,8 @@ def main() -> int:
 
     if (
         OUT.exists()
-        and len(result["errors"]) < 3
-        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "exdiv"))
+        and len(result["errors"]) < 4
+        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "rate", "exdiv"))
     ):
         print("Data unchanged, skipping write")
         return 0
@@ -234,7 +316,7 @@ def main() -> int:
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "exdiv"}, ensure_ascii=False, indent=1))
     print(f"exdiv rows: {len(result.get('exdiv', []))}")
-    return 0 if len(result["errors"]) < 3 else 1
+    return 0 if len(result["errors"]) < 4 else 1
 
 
 if __name__ == "__main__":

@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=7" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=7" />
-  <link rel="manifest" href="manifest.json?v=7" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=8" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=8" />
+  <link rel="manifest" href="manifest.json?v=8" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=7" />
+  <link rel="stylesheet" href="index.css?v=8" />
 </head>
 <body>
   <header class="app-header">
@@ -192,6 +192,7 @@
       <div class="card market-card">
         <h2>📡 最新盤後資料</h2>
         <div id="market-summary" class="market-summary muted">載入中...</div>
+        <div id="market-rate-line" class="hint"></div>
         <div class="btn-row">
           <button type="button" class="btn primary" id="btn-apply-market">套用盤後數據</button>
           <button type="button" class="btn" id="btn-refresh-market">🔄 重新抓取</button>
@@ -286,7 +287,7 @@
             </div>
             <div class="row">
               <label>無風險年利率 (%)
-                <input type="number" inputmode="decimal" id="annualRatePct" step="0.05" />
+                <input type="number" inputmode="decimal" id="annualRatePct" step="0.001" />
               </label>
               <label>自訂目標平倉價差
                 <input type="number" inputmode="decimal" id="targetExitSpread" step="1" placeholder="預設理論 +25" />
@@ -343,7 +344,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="engine.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

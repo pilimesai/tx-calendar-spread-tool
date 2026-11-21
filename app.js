@@ -253,6 +253,10 @@
     pill.classList.toggle("done", checkedSteps.size === total && total > 0);
   }
 
+  function getDefaultAnnualRate() {
+    return market?.rate?.annual_rate_pct ?? BASE.annualRatePct;
+  }
+
   function renderSimAndAdvanced(inp) {
     const simBanner = $("sim-banner");
     if (inp.evalDatetime) {
@@ -263,7 +267,7 @@
     }
 
     const hasCustomAdv =
-      Number($("annualRatePct").value) !== BASE.annualRatePct ||
+      Math.abs(Number($("annualRatePct").value) - getDefaultAnnualRate()) > 1e-6 ||
       $("evalDatetime").value !== "" ||
       $("nearSettlementOverride").value !== "" ||
       $("targetExitSpread").value !== "" ||
@@ -385,9 +389,11 @@
 
   function renderMarket() {
     const box = $("market-summary");
+    const rateEl = $("market-rate-line");
     const status = $("data-status");
     if (!market) {
       box.textContent = "無法載入盤後資料，請手動輸入參數。";
+      rateEl.textContent = "";
       if (!hasLiveQuote) {
         status.textContent = "⚠️ 盤後資料載入失敗";
         status.className = "data-status err";
@@ -420,6 +426,11 @@
       d.append(kk, vv);
       box.appendChild(d);
     }
+    if (market.rate?.annual_rate_pct != null) {
+      rateEl.textContent = `📌 公開短期利率：${market.rate.annual_rate_pct}%（${market.rate.source}・${market.rate.date}）`;
+    } else {
+      rateEl.textContent = "";
+    }
     if (!hasLiveQuote) {
       status.textContent = `✅ 盤後資料 ${fmtD(tx.date)}`;
       status.className = "data-status ok";
@@ -436,6 +447,7 @@
     if (tx.ma10_spread != null) $("ma10Spread").value = tx.ma10_spread;
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
     if (tr.net_long != null) $("trustNetLong").value = tr.net_long;
+    if (market.rate?.annual_rate_pct != null) $("annualRatePct").value = market.rate.annual_rate_pct;
     $("evalDatetime").value = "";
     $("nearSettlementOverride").value = "";
     render();
@@ -644,13 +656,6 @@
       await fetchLiveQuote({ silent: false });
     });
     $("btn-reset-api").addEventListener("click", async () => {
-      try { localStorage.removeItem(API_STORAGE_KEY); } catch (_) { }
-      liveApiUrl = DEFAULT_LIVE_API_URL;
-      $("live-api-url").value = liveApiUrl;
-      $("live-api-panel").classList.add("hidden");
-      await fetchLiveQuote({ silent: false });
-    });
-    $("btn-reset-api").addEventListener("click", async () => {
       try { localStorage.removeItem(API_STORAGE_KEY); } catch (_) {}
       liveApiUrl = DEFAULT_LIVE_API_URL;
       $("live-api-url").value = liveApiUrl;
@@ -686,7 +691,11 @@
       b.addEventListener("click", () => {
         const key = b.dataset.preset;
         if (key === "reset") checkedSteps.clear();
-        setForm(key === "reset" ? BASE : PRESETS[key]);
+        setForm(
+          key === "reset"
+            ? Object.assign({}, BASE, { annualRatePct: getDefaultAnnualRate() })
+            : PRESETS[key]
+        );
         render();
       })
     );
@@ -707,8 +716,14 @@
     const { shouldAutoFetch } = initLiveConfig();
     render();
     await fetchMarket();
-    if (!saved && market) applyMarket();
-    else render();
+    if (!saved && market) {
+      applyMarket();
+    } else {
+      if (market?.rate?.annual_rate_pct != null && Number($("annualRatePct").value) === BASE.annualRatePct) {
+        $("annualRatePct").value = market.rate.annual_rate_pct;
+      }
+      render();
+    }
 
     if (shouldAutoFetch) {
       await fetchLiveQuote({ silent: false });

@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-21T21:28:18+08:00",
+ "generated_at": "2026-11-21T21:52:04+08:00",
  "errors": [],
  "tx": {
   "date": "20261120",
@@ -62,6 +62,12 @@
   "date": "20261120",
   "oi_net": 87599,
   "net_long": 87599
+ },
+ "rate": {
+  "date": "2026-11-20",
+  "source": "銀行公會 TAIBOR 1個月期",
+  "taibor_1m": 1.604,
+  "annual_rate_pct": 1.604
  },
  "exdiv": [
   {
