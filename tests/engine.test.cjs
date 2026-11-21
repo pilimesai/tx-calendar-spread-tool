@@ -69,3 +69,37 @@ test("結算日過後自動換到下個月", () => {
   assert.equal(r.calendar.nearSettlement, "2026-12-16");
   assert.equal(r.calendar.farSettlement, "2027-01-20");
 });
+
+test("結構化體檢輸出：綠燈情境回傳 5 項全通過與黃金卡位期", () => {
+  const r = evaluateEntry({
+    indexLevel: 23000,
+    annualRatePct: 1.826,
+    expectedExDivPoints: 250,
+    marketSpread: -240,
+    foreignNetShort: 22000,
+    bidAskGap: 2,
+    evalDatetime: "2026-07-09T10:00",
+  });
+  assert.equal(r.signalShort, "可以分批進場");
+  assert.equal(r.calendar.phaseLabel, "黃金卡位期");
+  assert.equal(r.checks.length, 5);
+  assert.ok(r.checks.every((c) => c.status === "pass"));
+  assert.ok(r.valuation.plainSummary.includes("便宜"));
+});
+
+test("結構化體檢輸出：高估與高空單紅燈情境精確標記 block", () => {
+  const r = evaluateEntry({
+    indexLevel: 35800,
+    annualRatePct: 1.75,
+    expectedExDivPoints: 0,
+    marketSpread: 133,
+    foreignNetShort: 97863,
+    bidAskGap: 2,
+    evalDatetime: "2026-11-21T10:00",
+  });
+  assert.equal(r.signalShort, "先別進場");
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(byId.valuation.status, "block");
+  assert.equal(byId.chips.status, "block");
+  assert.equal(byId.exdiv.status, "pass");
+});

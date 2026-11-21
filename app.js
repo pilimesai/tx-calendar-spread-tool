@@ -1,9 +1,9 @@
-/* 介面邏輯：讀取盤後資料、收集參數、呼叫 SpreadEngine、渲染結果 */
+/* 介面邏輯：讀取盤後資料、收集參數、呼叫 SpreadEngine、渲染視覺化儀表板 */
 (function () {
   "use strict";
 
   const { evaluateEntry, parseIsoDate, iso } = window.SpreadEngine;
-  const STORAGE_KEY = "tx-spread-inputs-v1";
+  const STORAGE_KEY = "tx-spread-inputs-v2";
 
   const BASE = {
     indexLevel: 23000,
@@ -40,9 +40,20 @@
     "indexLevel", "annualRatePct", "expectedExDivPoints", "marketSpread",
     "foreignNetShort", "bidAskGap", "contracts",
   ]);
+  const STATUS_TEXT = { block: "紅線", warn: "注意", pass: "通過" };
+  const STATUS_RANK = { block: 0, warn: 1, pass: 2 };
+  const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
 
   let market = null;
+  const checkedSteps = new Set();
   const $ = (id) => document.getElementById(id);
+
+  function syncContractButtons(value) {
+    $("contractType").value = value;
+    document.querySelectorAll(".seg-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.contract === value);
+    });
+  }
 
   function setForm(values) {
     for (const k of FIELDS) {
@@ -51,6 +62,7 @@
       if (el.type === "checkbox") el.checked = Boolean(v);
       else el.value = v;
     }
+    syncContractButtons(values.contractType || BASE.contractType);
   }
 
   function readForm() {
@@ -74,7 +86,7 @@
         v[k] = el.type === "checkbox" ? el.checked : el.value;
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(v));
-    } catch (_) { /* 無痕模式等情況忽略 */ }
+    } catch (_) { /* 無痕模式忽略 */ }
   }
 
   function load() {
@@ -86,84 +98,220 @@
     }
   }
 
-  function factors(id, items, cls, icon) {
-    const box = $(id);
-    box.innerHTML = "";
-    for (const t of items) {
-      const d = document.createElement("div");
-      d.className = `factor ${cls}`;
-      d.textContent = `${icon} ${t}`;
-      box.appendChild(d);
-    }
-  }
-
   function money(n) {
     return `${n >= 0 ? "+" : "-"}NT$ ${Math.abs(n).toLocaleString("en-US")}`;
   }
 
-  function render() {
-    const r = evaluateEntry(readForm());
-    save();
+  function renderGauge(v) {
+    $("gauge-plain").textContent = v.plainSummary;
+    $("gauge-mid-label").textContent = `理論合理價 ${v.theoreticalSpread}`;
+    $("gauge-formula").textContent =
+      `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost} − 預計除息 ${v.expectedExDivPoints}`;
 
-    $("signal-banner").className = `signal-banner sig-${r.signal.toLowerCase()}`;
-    $("signal-label").textContent = r.signalLabel;
-    $("action-summary").textContent = r.actionSummary;
+    // -60 ~ +60 點對應 4% ~ 96%
+    const clamped = Math.max(-60, Math.min(60, v.mispricing));
+    const pct = 50 + (clamped / 60) * 46;
+    const pin = $("gauge-pin");
+    pin.style.left = `${pct}%`;
 
-    const v = r.valuation;
-    $("m-theory").textContent = `${v.theoreticalSpread} 點`;
-    $("m-theory-sub").textContent = `資金成本 +${v.fundingCost} − 除息 ${v.expectedExDivPoints}`;
+    // 接近左右邊緣時調整標籤對齊，避免在 375px 手機上被截斷
+    const lbl = $("gauge-pin-label");
+    lbl.textContent = `市場 ${v.marketSpread}`;
+    if (pct < 18) pin.style.transform = "translateX(-15%)";
+    else if (pct > 82) pin.style.transform = "translateX(-85%)";
+    else pin.style.transform = "translateX(-50%)";
+  }
 
-    const disc = $("m-disc");
-    disc.textContent = v.discountPoints >= 0 ? `低估 ${v.discountPoints}` : `高估 ${Math.abs(v.discountPoints)}`;
-    disc.className = `m-value ${v.discountPoints >= 0 ? "pos" : "neg"}`;
-    $("m-disc-sub").textContent = `${v.valuationLabel}｜市場 ${v.marketSpread}`;
+  function renderChecks(checks) {
+    const box = $("checks-list");
+    box.innerHTML = "";
+    const sorted = checks.slice().sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]);
 
-    const c = r.calendar;
-    $("m-days").textContent = c.isSettlementDay ? "今日結算！" : `${c.tradingDaysLeft} 交易日`;
-    $("m-days-sub").textContent = `近月 ${c.nearSettlement}｜遠月 ${c.farSettlement}`;
+    for (const item of sorted) {
+      const row = document.createElement("div");
+      row.className = `check-row ${item.status}`;
 
-    const s = r.sizing;
-    const p = $("m-profit");
-    p.textContent = money(s.expectedProfitTwd);
-    p.className = `m-value ${s.expectedProfitTwd >= 0 ? "pos" : "neg"}`;
-    $("m-profit-sub").textContent =
-      `${s.contracts} 組 ${s.contractName}｜目標 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）`;
+      const head = document.createElement("div");
+      head.className = "check-head";
 
-    factors("f-blockers", r.riskFactors.blockers, "blocker", "⛔");
-    factors("f-warnings", r.riskFactors.warnings, "warning", "⚠️");
-    factors("f-positives", r.riskFactors.positives, "positive", "✅");
+      const left = document.createElement("div");
+      left.className = "check-left";
+      const title = document.createElement("span");
+      title.className = "check-title";
+      title.textContent = item.title;
+      const metric = document.createElement("span");
+      metric.className = "check-metric";
+      metric.textContent = item.metric;
+      left.append(title, metric);
 
+      const badges = document.createElement("div");
+      badges.className = "check-badges";
+      const sub = document.createElement("span");
+      sub.className = "sub-badge";
+      sub.textContent = item.badge;
+      const tag = document.createElement("span");
+      tag.className = `status-tag ${item.status}`;
+      tag.textContent = STATUS_TEXT[item.status];
+      badges.append(sub, tag);
+
+      head.append(left, badges);
+
+      const summary = document.createElement("div");
+      summary.className = "check-summary";
+      summary.textContent = item.summary;
+
+      row.append(head, summary);
+      box.appendChild(row);
+    }
+  }
+
+  function renderChecklist(items) {
     const ul = $("checklist");
     ul.innerHTML = "";
-    for (const item of r.checklist) {
+    items.forEach((text, idx) => {
       const li = document.createElement("li");
+      const label = document.createElement("label");
+      label.className = "checklist-row";
       const cb = document.createElement("input");
       cb.type = "checkbox";
+      cb.checked = checkedSteps.has(idx);
+      if (cb.checked) label.classList.add("done");
+
+      cb.addEventListener("change", () => {
+        if (cb.checked) checkedSteps.add(idx);
+        else checkedSteps.delete(idx);
+        label.classList.toggle("done", cb.checked);
+        updateChecklistProgress(items.length);
+      });
+
       const sp = document.createElement("span");
-      sp.textContent = item;
-      li.append(cb, sp);
+      sp.textContent = text;
+      label.append(cb, sp);
+      li.appendChild(label);
       ul.appendChild(li);
+    });
+    updateChecklistProgress(items.length);
+  }
+
+  function updateChecklistProgress(total) {
+    const pill = $("checklist-progress");
+    pill.textContent = `已完成 ${checkedSteps.size} / ${total}`;
+    pill.classList.toggle("done", checkedSteps.size === total && total > 0);
+  }
+
+  function renderSimAndAdvanced(inp) {
+    const simBanner = $("sim-banner");
+    if (inp.evalDatetime) {
+      $("sim-banner-text").textContent = `🧪 目前為模擬情境（${inp.evalDatetime.replace("T", " ")}）`;
+      simBanner.classList.remove("hidden");
+    } else {
+      simBanner.classList.add("hidden");
     }
 
+    const hasCustomAdv =
+      Number($("annualRatePct").value) !== BASE.annualRatePct ||
+      $("evalDatetime").value !== "" ||
+      $("nearSettlementOverride").value !== "" ||
+      $("targetExitSpread").value !== "" ||
+      !$("exDivDatesConfirmed").checked;
+    $("adv-badge").classList.toggle("hidden", !hasCustomAdv);
+  }
+
+  function render() {
+    const inp = readForm();
+    const r = evaluateEntry(inp);
+    save();
+    renderSimAndAdvanced(inp);
+
+    const sigCls = `sig-${r.signal.toLowerCase()}`;
+    $("signal-banner").className = `signal-banner ${sigCls}`;
+    $("signal-dot").textContent = SIGNAL_ICON[r.signal];
+    $("signal-short").textContent = r.signalShort;
+    $("signal-label").textContent = r.signalLabel.replace(/^[🟢🟡🔴]\s*/, "");
+    $("action-summary").textContent = r.actionSummary;
+
+    // 統計膠囊
+    const counts = { block: 0, warn: 0, pass: 0 };
+    r.checks.forEach((c) => counts[c.status]++);
+    const heroCounts = $("hero-counts");
+    heroCounts.innerHTML = "";
+    for (const [cls, text] of [
+      ["block", `⛔ ${counts.block} 紅線`],
+      ["warn", `⚠️ ${counts.warn} 注意`],
+      ["pass", `✅ ${counts.pass} 通過`],
+    ]) {
+      if (cls === "block" && counts.block === 0) continue;
+      const sp = document.createElement("span");
+      sp.className = `h-pill ${cls}`;
+      sp.textContent = text;
+      heroCounts.appendChild(sp);
+    }
+
+    const v = r.valuation;
+    const c = r.calendar;
+    const s = r.sizing;
+
+    // 手機頂部即時迷你燈號列
+    const mini = $("live-mini-bar");
+    mini.className = `live-mini-bar ${sigCls}`;
+    const diffWord = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
+    const dayWord = c.isSettlementDay ? "今日結算" : `剩 ${c.tradingDaysLeft} 交易日`;
+    $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}`;
+
+    renderGauge(v);
+
+    // 4 張指標卡
+    $("m-theory").textContent = `${v.theoreticalSpread} 點`;
+    $("m-theory-sub").textContent = `利息 +${v.fundingCost} − 除息 ${v.expectedExDivPoints}`;
+
+    const disc = $("m-disc");
+    disc.textContent = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
+    disc.className = `m-value ${v.mispricing > 0 ? "neg" : "pos"}`;
+    $("m-disc-sub").textContent = `市場報價 ${v.marketSpread}｜${v.valuationLabel}`;
+
+    $("m-days").textContent = c.isSettlementDay ? "今日結算！" : `剩 ${c.tradingDaysLeft} 交易日`;
+    $("m-phase").textContent = c.phaseLabel;
+    $("m-days-sub").textContent = `近 ${c.nearSettlement}｜遠 ${c.farSettlement}`;
+
+    const p = $("m-profit");
+    p.textContent = s.expectedProfitTwd >= 0 ? `預計賺 ${money(s.expectedProfitTwd)}` : `預估虧 ${money(s.expectedProfitTwd)}`;
+    p.className = `m-value ${s.expectedProfitTwd >= 0 ? "pos" : "neg"}`;
+    $("m-profit-sub").textContent =
+      `目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
+
+    renderChecks(r.checks);
+    renderChecklist(r.checklist);
     renderExDiv(c.nearSettlement, c.farSettlement);
   }
 
   function renderExDiv(nearIso, farIso) {
     const box = $("exdiv-list");
     const win = $("exdiv-window");
+    const pill = $("exdiv-count");
     box.innerHTML = "";
     if (!market || !Array.isArray(market.exdiv)) {
+      pill.textContent = "-- 檔";
       win.textContent = "尚無除權息預告資料。";
       return;
     }
     const start = iso(new Date(parseIsoDate(nearIso).getTime() + 86400000));
     const rows = market.exdiv.filter((x) => x.date >= start && x.date <= farIso);
-    win.textContent = `區間：${start} ～ ${farIso}，共 ${rows.length} 檔（證交所目前已公告者）`;
+    pill.textContent = `${rows.length} 檔`;
+    win.textContent = `區間：${start} ～ ${farIso}（證交所目前已公告者）`;
+
+    if (rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.padding = "8px 0";
+      empty.textContent = "此區間目前沒有已公告除權息的股票。";
+      box.appendChild(empty);
+      return;
+    }
+
     for (const x of rows) {
       const d = document.createElement("div");
       d.className = "exdiv-item";
       const cash = x.cash_dividend == null ? "待公告" : `現金 ${x.cash_dividend}`;
-      d.innerHTML = "";
       for (const [cls, txt] of [["d", x.date.slice(5)], ["n", `${x.code} ${x.name}（${x.type}）`], ["c", cash]]) {
         const s = document.createElement("span");
         s.className = cls;
@@ -189,7 +337,7 @@
     const items = [
       ["資料日期", fmtD(tx.date)],
       [`近遠月價差 ${tx.near_month?.slice(4) || ""}/${tx.far_month?.slice(4) || ""}`, tx.spread ?? "--"],
-      ["近月結算價", tx.near_price ?? "--"],
+      ["近月結算價", tx.near_price != null ? tx.near_price.toLocaleString("en-US") : "--"],
       ["外資台指淨空單", fo.net_short != null ? fo.net_short.toLocaleString("en-US") + " 口" : "--"],
     ];
     box.className = "market-summary";
@@ -218,6 +366,7 @@
     if (tx.spread != null) $("marketSpread").value = tx.spread;
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
     $("evalDatetime").value = "";
+    $("nearSettlementOverride").value = "";
     render();
   }
 
@@ -240,21 +389,38 @@
       $(k).addEventListener("input", render);
       $(k).addEventListener("change", render);
     }
+
+    document.querySelectorAll(".seg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        syncContractButtons(btn.dataset.contract);
+        render();
+      });
+    });
+
     document.querySelectorAll("[data-preset]").forEach((b) =>
       b.addEventListener("click", () => {
-        setForm(b.dataset.preset === "reset" ? BASE : PRESETS[b.dataset.preset]);
+        const key = b.dataset.preset;
+        if (key === "reset") checkedSteps.clear();
+        setForm(key === "reset" ? BASE : PRESETS[key]);
         render();
       })
     );
+
     $("btn-apply-market").addEventListener("click", applyMarket);
     $("btn-refresh-market").addEventListener("click", async () => {
       await fetchMarket();
       render();
     });
+    $("btn-exit-sim").addEventListener("click", () => {
+      $("evalDatetime").value = "";
+      $("nearSettlementOverride").value = "";
+      if (market) applyMarket();
+      else render();
+    });
 
     render();
     await fetchMarket();
-    if (!saved && market) applyMarket(); // 第一次開啟自動帶入盤後資料
+    if (!saved && market) applyMarket();
     else render();
   });
 })();

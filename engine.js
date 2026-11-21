@@ -124,90 +124,192 @@
     else if (mispricing <= 10) valuationLabel = "合理價附近";
     else valuationLabel = "溢價（昂貴，買盤已反映）";
 
+    let plainSummary;
+    if (mispricing <= -15) plainSummary = `比合理價便宜 ${fmt(discountPoints)} 點，具安全邊際`;
+    else if (mispricing < -3) plainSummary = `比合理價略便宜 ${fmt(discountPoints)} 點`;
+    else if (mispricing <= 0) plainSummary = `貼近合理價（便宜 ${fmt(discountPoints)} 點）`;
+    else if (mispricing <= 10) plainSummary = `比合理價略貴 ${fmt(mispricing)} 點，安全邊際偏低`;
+    else if (mispricing <= 15) plainSummary = `比合理價貴了 ${fmt(mispricing)} 點，須提防追高`;
+    else plainSummary = `比合理價貴了 ${fmt(mispricing)} 點，買盤已反映，追高風險大`;
+
     const nearMonth = nearSettlement.getUTCMonth() + 1;
     const isExDivSeason = [6, 7, 8, 9].includes(nearMonth) || inp.expectedExDivPoints > 0;
 
     const blockers = [];
     const warnings = [];
     const positives = [];
+    const checks = [];
 
-    // --- 時間與結算日尾盤 ---
+    function pushFactor(status, msg) {
+      if (status === "block") blockers.push(msg);
+      else if (status === "warn") warnings.push(msg);
+      else positives.push(msg);
+    }
+
+    // --- 結算時機與尾盤 ---
+    let phaseLabel, timingStatus, timingMsg;
     if (isSettlementDay && minutes >= 13 * 60 + 15) {
-      blockers.push(
-        "已進入結算日 13:15 後流動性黑洞，五檔掛單稀疏且 13:30 未平倉將強制結算近月、留下純遠月多單裸露風險，嚴禁新進場！"
-      );
+      phaseLabel = "尾盤黑洞";
+      timingStatus = "block";
+      timingMsg =
+        "已進入結算日 13:15 後流動性黑洞，五檔掛單稀疏且 13:30 未平倉將強制結算近月、留下純遠月多單裸露風險，嚴禁新進場！";
     } else if (isSettlementDay) {
-      warnings.push("今日為結算日，正二轉倉已近尾聲，新進場空間有限，且務必於 13:00～13:15 前平倉完畢。");
+      phaseLabel = "結算日當天";
+      timingStatus = "warn";
+      timingMsg = "今日為結算日，正二轉倉已近尾聲，新進場空間有限，且務必於 13:00～13:15 前平倉完畢。";
     } else if (tradingDaysLeft === 1) {
-      warnings.push("距離結算僅剩 1 個交易日，正二轉倉買盤可能已大量進場，需確認目前價差尚未溢價。");
+      phaseLabel = "結算前夕";
+      timingStatus = "warn";
+      timingMsg = "距離結算僅剩 1 個交易日，正二轉倉買盤可能已大量進場，需確認目前價差尚未溢價。";
     } else if (tradingDaysLeft >= 2 && tradingDaysLeft <= 5) {
-      positives.push(`距離結算尚餘 ${tradingDaysLeft} 個交易日，正處於「結算前 2～5 天」黃金卡位佈局期。`);
+      phaseLabel = "黃金卡位期";
+      timingStatus = "pass";
+      timingMsg = `距離結算尚餘 ${tradingDaysLeft} 個交易日，正處於「結算前 2～5 天」黃金卡位佈局期。`;
     } else {
-      warnings.push(`距離結算還有 ${tradingDaysLeft} 個交易日，過早進場資金效率較低，且除權息或籌碼變數較大。`);
+      phaseLabel = "過早觀察期";
+      timingStatus = "warn";
+      timingMsg = `距離結算還有 ${tradingDaysLeft} 個交易日，過早進場資金效率較低，且除權息或籌碼變數較大。`;
     }
+    pushFactor(timingStatus, timingMsg);
 
-    // --- 五檔價差 ---
+    // --- 五檔流動性 ---
+    let liqStatus, liqBadge, liqMsg;
     if (inp.bidAskGap >= 15) {
-      blockers.push(`委賣與委買價差達 ${fmt(inp.bidAskGap)} 點，流動性極差、滑價風險過高，不建議此時掛單進場。`);
+      liqStatus = "block";
+      liqBadge = "滑價過大";
+      liqMsg = `委賣與委買價差達 ${fmt(inp.bidAskGap)} 點，流動性極差、滑價風險過高，不建議此時掛單進場。`;
     } else if (inp.bidAskGap > 5) {
-      warnings.push(`委賣與委買價差偏寬（${fmt(inp.bidAskGap)} 點），切勿追價，務必使用 ROD 限價複式單耐心掛單。`);
+      liqStatus = "warn";
+      liqBadge = "價差偏寬";
+      liqMsg = `委賣與委買價差偏寬（${fmt(inp.bidAskGap)} 點），切勿追價，務必使用 ROD 限價複式單耐心掛單。`;
     } else {
-      positives.push(`五檔買賣價差緊密（${fmt(inp.bidAskGap)} 點），流動性良好。`);
+      liqStatus = "pass";
+      liqBadge = "流動性佳";
+      liqMsg = `五檔買賣價差緊密（${fmt(inp.bidAskGap)} 點），流動性良好。`;
     }
+    pushFactor(liqStatus, liqMsg);
 
-    // --- 折溢價 ---
+    // --- 價位安全邊際 ---
+    let valStatus, valBadge, valMsg;
     if (mispricing > 15) {
-      blockers.push(
-        `市場報價（${fmt(inp.marketSpread)}）已高於理論價差（${fmt(theoreticalSpread)}）達 ${fmt(mispricing)} 點，轉倉買盤已充分反映，此時追多安全邊際不足。`
-      );
+      valStatus = "block";
+      valBadge = "大幅溢價";
+      valMsg = `市場報價（${fmt(inp.marketSpread)}）已高於理論價差（${fmt(theoreticalSpread)}）達 ${fmt(mispricing)} 點，轉倉買盤已充分反映，此時追多安全邊際不足。`;
     } else if (mispricing > 0) {
-      warnings.push(
-        `市場報價微幅溢價 ${fmt(mispricing)} 點，目前進場屬於純賭「正二轉倉力道大於外資空單轉倉」，缺乏價值回歸保護。`
-      );
+      valStatus = "warn";
+      valBadge = "微幅溢價";
+      valMsg = `市場報價微幅溢價 ${fmt(mispricing)} 點，目前進場屬於純賭「正二轉倉力道大於外資空單轉倉」，缺乏價值回歸保護。`;
     } else if (mispricing <= -15) {
-      positives.push(`市場報價低於理論值 ${fmt(discountPoints)} 點，具備充足安全邊際，適合分批買進價差單。`);
+      valStatus = "pass";
+      valBadge = "明顯折價";
+      valMsg = `市場報價低於理論值 ${fmt(discountPoints)} 點，具備充足安全邊際，適合分批買進價差單。`;
     } else {
-      positives.push(`市場報價貼近或微幅折價於理論值（折價 ${fmt(discountPoints)} 點），價位尚屬合理。`);
+      valStatus = "pass";
+      valBadge = "合理區間";
+      valMsg = `市場報價貼近或微幅折價於理論值（折價 ${fmt(discountPoints)} 點），價位尚屬合理。`;
     }
+    pushFactor(valStatus, valMsg);
 
-    // --- 外資淨空單 ---
+    // --- 外資籌碼壓力 ---
     const fns = inp.foreignNetShort;
+    let chipStatus, chipBadge, chipMsg;
     if (fns >= 45000 && mispricing >= -10) {
-      blockers.push(
-        `外資未平倉淨空單高達 ${fmtInt(fns)} 口（遠超 4 萬口警戒線），且價差折價不足（僅 ${fmt(discountPoints)} 點），外資反向轉倉（買近賣遠）可能壓垮價差。`
-      );
+      chipStatus = "block";
+      chipBadge = "空單極高";
+      chipMsg = `外資未平倉淨空單高達 ${fmtInt(fns)} 口（遠超 4 萬口警戒線），且價差折價不足（僅 ${fmt(discountPoints)} 點），外資反向轉倉（買近賣遠）可能壓垮價差。`;
     } else if (fns >= 40000) {
-      warnings.push(
-        `外資未平倉淨空單達 ${fmtInt(fns)} 口（已達 4 萬口警戒線），結算前外資反向轉倉賣壓可能壓抑價差漲幅，建議縮小部位或嚴設目標。`
-      );
+      chipStatus = "warn";
+      chipBadge = "警戒水位";
+      chipMsg = `外資未平倉淨空單達 ${fmtInt(fns)} 口（已達 4 萬口警戒線），結算前外資反向轉倉賣壓可能壓抑價差漲幅，建議縮小部位或嚴設目標。`;
     } else if (fns >= 25000) {
-      warnings.push(`外資淨空單為 ${fmtInt(fns)} 口，屬於中等水位，須持續追蹤結算前外資轉倉動向。`);
+      chipStatus = "warn";
+      chipBadge = "中等水位";
+      chipMsg = `外資淨空單為 ${fmtInt(fns)} 口，屬於中等水位，須持續追蹤結算前外資轉倉動向。`;
     } else {
-      positives.push(`外資淨空單水位偏低（${fmtInt(fns)} 口），反向轉倉賣壓相對可控。`);
+      chipStatus = "pass";
+      chipBadge = "賣壓可控";
+      chipMsg = `外資淨空單水位偏低（${fmtInt(fns)} 口），反向轉倉賣壓相對可控。`;
+    }
+    pushFactor(chipStatus, chipMsg);
+
+    // --- 除權息變數 ---
+    let exStatus, exBadge, exMsg;
+    if (isExDivSeason && !inp.exDivDatesConfirmed) {
+      exStatus = "warn";
+      exBadge = "日期未全定";
+      exMsg =
+        "目前處於除權息影響區間，但主要權值股除息日尚未完全公告，存在「除息日跨月跳動」或「股利不如預期」的劇烈跳空風險，建議等主要權值股除息日確定後再進場。";
+      pushFactor("warn", exMsg);
+    } else if (isExDivSeason) {
+      exStatus = "pass";
+      exBadge = "日期已確認";
+      exMsg = "區間主要大型權值股除息日已正式公告，理論價差估算準確度較高。";
+      pushFactor("pass", exMsg);
+    } else {
+      exStatus = "pass";
+      exBadge = "非除息旺季";
+      exMsg = "非 6～9 月除權息旺季且無預估除息點數，遠月合約不受除息蒸發干擾。";
     }
 
-    // --- 除權息 ---
-    if (isExDivSeason && !inp.exDivDatesConfirmed) {
-      warnings.push(
-        "目前處於除權息影響區間，但主要權值股除息日尚未完全公告，存在「除息日跨月跳動」或「股利不如預期」的劇烈跳空風險，建議等主要權值股除息日確定後再進場。"
-      );
-    } else if (isExDivSeason) {
-      positives.push("區間主要大型權值股除息日已正式公告，理論價差估算準確度較高。");
-    }
+    checks.push(
+      {
+        id: "valuation",
+        title: "價位安全邊際",
+        status: valStatus,
+        badge: valBadge,
+        metric: mispricing > 0 ? `貴 ${fmt(mispricing)} 點` : `便宜 ${fmt(discountPoints)} 點`,
+        summary: valMsg,
+      },
+      {
+        id: "timing",
+        title: "結算時機",
+        status: timingStatus,
+        badge: phaseLabel,
+        metric: isSettlementDay ? "今日結算" : `剩 ${tradingDaysLeft} 交易日`,
+        summary: timingMsg,
+      },
+      {
+        id: "chips",
+        title: "外資籌碼壓力",
+        status: chipStatus,
+        badge: chipBadge,
+        metric: `${fmtInt(fns)} 口`,
+        summary: chipMsg,
+      },
+      {
+        id: "liquidity",
+        title: "五檔流動性",
+        status: liqStatus,
+        badge: liqBadge,
+        metric: `價差 ${fmt(inp.bidAskGap)} 點`,
+        summary: liqMsg,
+      },
+      {
+        id: "exdiv",
+        title: "除權息變數",
+        status: exStatus,
+        badge: exBadge,
+        metric: isExDivSeason ? `預估除息 ${fmt(inp.expectedExDivPoints)} 點` : "非旺季",
+        summary: exMsg,
+      }
+    );
 
     // 5. 燈號
-    let signal, signalLabel, actionSummary;
+    let signal, signalShort, signalLabel, actionSummary;
     if (blockers.length) {
       signal = "RED";
+      signalShort = "先別進場";
       signalLabel = "🔴 不建議進場（觸發風控紅線）";
       actionSummary = "目前存在明確紅線風險，建議觀望或等待條件改善後再評估。";
     } else if (warnings.length >= 2 || (mispricing > 0 && warnings.length >= 1)) {
       signal = "YELLOW";
+      signalShort = "謹慎評估／小額試單";
       signalLabel = "🟡 謹慎評估／小額試單";
       actionSummary =
         "部分條件未達理想或存在潛在變數，若欲參與建議以小台（MTX）或微台（TMF）輕倉分批試單，並嚴控出場時機。";
     } else {
       signal = "GREEN";
+      signalShort = "可以分批進場";
       signalLabel = "🟢 建議分批進場（具策略優勢）";
       actionSummary = "時間點、折溢價安全邊際與籌碼條件皆符合策略要求，可分批掛 ROD 限價「買進」跨月價差複式單。";
     }
@@ -232,6 +334,7 @@
 
     return {
       signal,
+      signalShort,
       signalLabel,
       actionSummary,
       calendar: {
@@ -241,6 +344,7 @@
         tradingDaysLeft,
         isSettlementDay,
         isExDivSeason,
+        phaseLabel,
       },
       valuation: {
         fundingCost,
@@ -250,8 +354,10 @@
         mispricing,
         discountPoints,
         valuationLabel,
+        plainSummary,
       },
       riskFactors: { blockers, warnings, positives },
+      checks,
       sizing: {
         contractName: spec.name,
         pointValue: pv,
