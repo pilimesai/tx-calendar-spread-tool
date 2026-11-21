@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>台指期跨月價差 | 進場決策工具</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=1" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=1" />
+  <link rel="manifest" href="manifest.json?v=1" />
+  <meta name="theme-color" content="#121826" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="跨月價差" />
+  <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
+  <link rel="stylesheet" href="index.css?v=1" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+        <h1>台指期跨月價差・進場決策</h1>
+        <p class="subtitle">吃正二轉倉豆腐｜理論價差 × 安全邊際 × 籌碼與結算風控</p>
+      </div>
+      <div class="data-status" id="data-status">盤後資料載入中...</div>
+    </div>
+  </header>
+
+  <nav class="quick-nav" aria-label="快速導覽">
+    <a href="#sec-signal">🚦 燈號</a>
+    <a href="#sec-inputs">⚙️ 參數</a>
+    <a href="#sec-factors">🛡️ 風控</a>
+    <a href="#sec-exdiv">📅 除息</a>
+    <a href="#sec-checklist">✅ 清單</a>
+  </nav>
+
+  <main class="layout">
+    <!-- 結果 -->
+    <section class="col results" id="sec-signal">
+      <div id="signal-banner" class="signal-banner">
+        <div class="signal-title" id="signal-label">計算中...</div>
+        <div class="signal-desc" id="action-summary"></div>
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="m-label">理論跨月價差</div>
+          <div class="m-value" id="m-theory">--</div>
+          <div class="m-sub" id="m-theory-sub">--</div>
+        </div>
+        <div class="metric">
+          <div class="m-label">折溢價（安全邊際）</div>
+          <div class="m-value" id="m-disc">--</div>
+          <div class="m-sub" id="m-disc-sub">--</div>
+        </div>
+        <div class="metric">
+          <div class="m-label">距近月結算</div>
+          <div class="m-value" id="m-days">--</div>
+          <div class="m-sub" id="m-days-sub">--</div>
+        </div>
+        <div class="metric">
+          <div class="m-label">預估目標損益</div>
+          <div class="m-value" id="m-profit">--</div>
+          <div class="m-sub" id="m-profit-sub">--</div>
+        </div>
+      </div>
+
+      <div class="card" id="sec-factors">
+        <h2>🛡️ 風控與條件檢核</h2>
+        <div id="f-blockers"></div>
+        <div id="f-warnings"></div>
+        <div id="f-positives"></div>
+      </div>
+    </section>
+
+    <!-- 輸入 -->
+    <section class="col inputs" id="sec-inputs">
+      <div class="card market-card">
+        <h2>📡 最新盤後資料</h2>
+        <div id="market-summary" class="market-summary muted">載入中...</div>
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="btn-apply-market">套用盤後資料到參數</button>
+          <button type="button" class="btn" id="btn-refresh-market">🔄 重新抓取</button>
+        </div>
+        <p class="hint">盤後資料為前一交易日結算價，盤中請改填券商 App 上的即時價差報價。</p>
+      </div>
+
+      <div class="card">
+        <h2>快速情境</h2>
+        <div class="chips">
+          <button type="button" class="chip" data-preset="july_discount">7月除息低估買點</button>
+          <button type="button" class="chip" data-preset="non_exdiv_golden">非除權息黃金期</button>
+          <button type="button" class="chip" data-preset="settlement_blackhole">結算日13:18黑洞</button>
+          <button type="button" class="chip" data-preset="reset">清除重填</button>
+        </div>
+      </div>
+
+      <form id="eval-form" onsubmit="event.preventDefault();">
+        <div class="card">
+          <h2>1. 理論價差與市場報價</h2>
+          <div class="row">
+            <label>台指期點位
+              <input type="number" inputmode="decimal" id="indexLevel" step="10" />
+            </label>
+            <label>無風險年利率 (%)
+              <input type="number" inputmode="decimal" id="annualRatePct" step="0.05" />
+            </label>
+          </div>
+          <div class="row">
+            <label>區間預計除息點數
+              <input type="number" inputmode="decimal" id="expectedExDivPoints" step="1" min="0" />
+            </label>
+            <label>市場價差報價（遠－近）
+              <input type="number" inputmode="decimal" id="marketSpread" step="1" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>2. 籌碼、流動性與除息</h2>
+          <div class="row">
+            <label>外資台指期淨空單（口）
+              <input type="number" inputmode="numeric" id="foreignNetShort" step="500" />
+            </label>
+            <label>五檔買賣價差（點）
+              <input type="number" inputmode="decimal" id="bidAskGap" step="1" min="0" />
+            </label>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="exDivDatesConfirmed" />
+            <span>主要權值股除息日均已公告（非除權息季保持勾選）</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <h2>3. 時間與部位</h2>
+          <div class="row stack-sm">
+            <label>評估時間（空白＝現在）
+              <input type="datetime-local" id="evalDatetime" />
+            </label>
+            <label>近月結算日覆寫（遇假日）
+              <input type="date" id="nearSettlementOverride" />
+            </label>
+          </div>
+          <div class="row three">
+            <label>商品
+              <select id="contractType">
+                <option value="MTX">小台 MTX（50元）</option>
+                <option value="TX">大台 TX（200元）</option>
+                <option value="TMF">微台 TMF（10元）</option>
+              </select>
+            </label>
+            <label>組數
+              <input type="number" inputmode="numeric" id="contracts" min="1" />
+            </label>
+            <label>目標平倉價差
+              <input type="number" inputmode="decimal" id="targetExitSpread" step="1" placeholder="理論+25" />
+            </label>
+          </div>
+        </div>
+      </form>
+
+      <div class="card" id="sec-exdiv">
+        <h2>📅 近遠月區間除權息預告（證交所）</h2>
+        <div id="exdiv-window" class="muted"></div>
+        <div id="exdiv-list" class="exdiv-list"></div>
+        <p class="hint">影響點數需參考期貨商晨報／XQ「各月份預估除息點數表」，再填入上方欄位。</p>
+      </div>
+
+      <div class="card" id="sec-checklist">
+        <h2>✅ 下單前實戰檢核清單</h2>
+        <ul id="checklist" class="checklist"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
+
+  <script src="engine.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>

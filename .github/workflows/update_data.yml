@@ -1,0 +1,38 @@
+name: Update Market Data
+
+on:
+  schedule:
+    # 台灣時間 15:35、17:35、19:35（UTC 07:35、09:35、11:35）週一～週五
+    # 期交所約 15:00 後公布結算價與三大法人未平倉
+    - cron: '35 7,9,11 * * 1-5'
+  workflow_dispatch: # 可在 GitHub Actions 頁面手動執行
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch market data
+        run: python fetch_data.py
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.name 'github-actions[bot]'
+          git config --local user.email 'github-actions[bot]@users.noreply.github.com'
+          git add data/market.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: auto-update market data"
+            git push
+          else
+            echo "No changes to commit"
+          fi
