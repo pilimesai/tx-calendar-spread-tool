@@ -7,8 +7,8 @@
 - 期交所歷史下載（futDataDown）：近 10 個交易日近遠月價差 → MA10
 - 期交所 OpenAPI：三大法人台指期未平倉 → 投信淨多單、外資淨空單
 - 銀行公會 TAIBOR：1 個月期定盤利率 → 無風險短期年利率
-- 證交所：除權除息預告表（TWT48U）
-- 證交所：每日盤後統計（FMTQIK）→ 加權指數近 5 日漲跌幅
+- 證交所：每日盤後統計（FMTQIK）→ 加權指數收盤與近 5 日漲跌幅
+- 證交所：除權除息預告表（TWT48U）＋ 上市發行股數（t187ap03_L）＋ 每日收盤（STOCK_DAY_ALL）→ 自動計算區間成份股蒸發點數
 """
 
 from __future__ import annotations
@@ -35,6 +35,9 @@ TAIBOR_DAILY_INDEX = "https://www.ba.org.tw/taiborDaily/index"
 TAIBOR_DOWNLOAD_BASE = "https://www.ba.org.tw/taiborDaily/DownloadAll?id="
 TWSE_EXDIV = "https://www.twse.com.tw/rwd/zh/exRight/TWT48U?response=json"
 TWSE_FMTQIK = "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ym}01&response=json"
+TWSE_COMPANIES = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+TWSE_STOCK_DAY_ALL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+TWSE_MI_INDEX_IND = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?type=IND&response=json"
 
 
 def get_json(url: str):
@@ -281,20 +284,77 @@ def fetch_taiex_5d() -> dict:
     }
 
 
-def fetch_exdiv() -> list[dict]:
+def fetch_taiex_divisor(taiex_close: float | None) -> tuple[dict[str, float], float, dict]:
+    """依上市普通股發行股數與收盤價估算加權指數總市值與指數基值（每點對應市值）。"""
+    if taiex_close is None or taiex_close <= 0:
+        mi_payload = get_json(TWSE_MI_INDEX_IND)
+        for table in mi_payload.get("tables", []) or []:
+            for row in table.get("data", []) or []:
+                if row and str(row[0]).strip() == "發行量加權股價指數":
+                    taiex_close = to_num(row[1])
+                    break
+            if taiex_close:
+                break
+    if not taiex_close or taiex_close <= 0:
+        raise RuntimeError("無法取得發行量加權股價指數收盤值")
+
+    companies = get_json(TWSE_COMPANIES)
+    shares_map: dict[str, float] = {}
+    for row in companies or []:
+        code = str(row.get("公司代號") or "").strip()
+        sh = to_num(row.get("已發行普通股數或TDR原股發行股數"))
+        if code and sh and sh > 0:
+            shares_map[code] = sh
+
+    daily_all = get_json(TWSE_STOCK_DAY_ALL)
+    closes_map: dict[str, float] = {}
+    for row in daily_all or []:
+        code = str(row.get("Code") or "").strip()
+        c = to_num(row.get("ClosingPrice"))
+        if code and c and c > 0:
+            closes_map[code] = c
+
+    matched = [c for c in shares_map if c in closes_map]
+    total_mcap = sum(shares_map[c] * closes_map[c] for c in matched)
+    if total_mcap <= 0:
+        raise RuntimeError("無法匹配上市普通股市值以推算指數基值")
+
+    divisor = total_mcap / taiex_close
+    meta = {
+        "taiex_close": round(taiex_close, 2),
+        "total_market_cap_t": round(total_mcap / 1e12, 3),
+        "divisor_b": round(divisor / 1e9, 4),
+        "constituent_count": len(matched),
+    }
+    return shares_map, divisor, meta
+
+
+def fetch_exdiv(shares_map: dict[str, float] | None = None, divisor: float | None = None) -> list[dict]:
     payload = get_json(TWSE_EXDIV)
     out = []
     for row in payload.get("data", []) or []:
         date_iso = roc_to_iso(row[0])
         if not date_iso:
             continue
+        code = str(row[1]).strip()
         cash = to_num(row[7])
+        is_constituent = bool(shares_map and code in shares_map)
+        if not is_constituent:
+            impact_points = 0.0
+        elif cash is None:
+            impact_points = None
+        elif cash > 0 and divisor and divisor > 0:
+            impact_points = round(shares_map[code] * cash / divisor, 3)
+        else:
+            impact_points = 0.0
         out.append({
             "date": date_iso,
-            "code": row[1],
+            "code": code,
             "name": row[2],
             "type": row[3],
             "cash_dividend": cash,  # None 代表「待公告」
+            "is_constituent": is_constituent,
+            "impact_points": impact_points,
         })
     out.sort(key=lambda r: (r["date"], r["code"]))
     return out
@@ -346,23 +406,27 @@ def main() -> int:
             result["rate"] = old["rate"]
 
     try:
-        result["exdiv"] = fetch_exdiv()
-    except Exception as exc:
-        result["errors"].append(f"exdiv: {exc}")
-        if "exdiv" in old:
-            result["exdiv"] = old["exdiv"]
-
-    try:
         result["taiex"] = fetch_taiex_5d()
     except Exception as exc:
         result["errors"].append(f"taiex: {exc}")
         if "taiex" in old:
             result["taiex"] = old["taiex"]
 
+    try:
+        shares_map, divisor, exdiv_meta = fetch_taiex_divisor(result.get("taiex", {}).get("close"))
+        result["exdiv_meta"] = exdiv_meta
+        result["exdiv"] = fetch_exdiv(shares_map, divisor)
+    except Exception as exc:
+        result["errors"].append(f"exdiv: {exc}")
+        if "exdiv" in old:
+            result["exdiv"] = old["exdiv"]
+        if "exdiv_meta" in old:
+            result["exdiv_meta"] = old["exdiv_meta"]
+
     if (
         OUT.exists()
         and len(result["errors"]) < 5
-        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "rate", "exdiv", "taiex"))
+        and all(result.get(k) == old.get(k) for k in ("tx", "foreign", "trust", "rate", "taiex", "exdiv_meta", "exdiv"))
     ):
         print("Data unchanged, skipping write")
         return 0

@@ -423,3 +423,22 @@ test("除權高峰超值加碼維持減半上限：2 口降 1 口可放大至 2 
   assert.equal(r1.sizing.scaleUpMaxContracts, 1);
   assert.equal(r1.sizing.scaleUpTriggered, false);
 });
+
+test("非旺季零星自動除息（如 11 月 0.36 點）精確扣除理論價且不誤判為除息旺季", () => {
+  const r = evaluateEntry({
+    indexLevel: 35800,
+    annualRatePct: 1.604,
+    expectedExDivPoints: 0.36,
+    marketSpread: 40,
+    ma10Spread: 60,
+    trustNetLong: 87599,
+    foreignNetShort: 97863,
+    bidAskGap: 2,
+    evalDatetime: "2026-12-11T10:00",
+  });
+  const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+  assert.equal(r.calendar.isExDivSeason, false);
+  assert.equal(r.valuation.theoreticalSpread, Math.round((r.valuation.fundingCost - 0.36) * 100) / 100);
+  assert.equal(byId.exdiv.badge, "非除息旺季");
+  assert.ok(byId.exdiv.metric.includes("自動試算 -0.36 點"));
+});

@@ -136,7 +136,7 @@
     const overheatCap = Math.max(15, Math.round(inp.indexLevel * 0.0004));
 
     const nearMonth = nearSettlement.getUTCMonth() + 1;
-    const isExDivSeason = [6, 7, 8, 9].includes(nearMonth) || inp.expectedExDivPoints > 0;
+    const isExDivSeason = [6, 7, 8, 9].includes(nearMonth) || inp.expectedExDivPoints >= 5;
     const isExDivPeak = [6, 7].includes(nearMonth) || inp.expectedExDivPoints >= 150;
 
     const blockers = [];
@@ -383,6 +383,10 @@
       exBadge = "日期已確認";
       exMsg = "區間主要大型權值股除息日已正式公告，理論價差估算準確度較高。";
       pushFactor("pass", exMsg);
+    } else if (inp.expectedExDivPoints > 0) {
+      exStatus = "pass";
+      exBadge = "非除息旺季";
+      exMsg = `非 6～9 月除權息旺季，區間已公告零星除息合計自動扣除 ${fmt(inp.expectedExDivPoints)} 點。`;
     } else {
       exStatus = "pass";
       exBadge = "非除息旺季";
@@ -435,7 +439,9 @@
         title: "除權息變數",
         status: exStatus,
         badge: exBadge,
-        metric: isExDivSeason ? `預估除息 ${fmt(inp.expectedExDivPoints)} 點` : "非旺季",
+        metric: inp.expectedExDivPoints > 0
+          ? `自動試算 -${fmt(inp.expectedExDivPoints)} 點`
+          : (isExDivSeason ? "自動試算 0 點" : "非旺季"),
         summary: exMsg,
       }
     );

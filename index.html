@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=10" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=10" />
-  <link rel="manifest" href="manifest.json?v=10" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=11" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=11" />
+  <link rel="manifest" href="manifest.json?v=11" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=10" />
+  <link rel="stylesheet" href="index.css?v=11" />
 </head>
 <body>
   <header class="app-header">
@@ -225,23 +225,13 @@
             </label>
           </div>
           <div class="row">
-            <label>區間預計除息點數
-              <input type="number" inputmode="decimal" id="expectedExDivPoints" step="1" min="0" />
-              <span class="field-tip">10～5月填 0；6～9月看晨報</span>
-            </label>
             <label>五檔買賣價差（點）
               <input type="number" inputmode="decimal" id="bidAskGap" step="1" min="0" />
               <span class="field-tip">委賣 − 委買，≤ 5 點佳</span>
             </label>
-          </div>
-          <div class="row">
             <label>大盤近 5 日漲跌幅 (%)
               <input type="number" inputmode="decimal" id="taiex5dChangePct" step="0.1" placeholder="選填" />
               <span class="field-tip">跌逾 3% 降黃燈｜跌逾 5% 亮紅燈</span>
-            </label>
-            <label>台指期點位
-              <input type="number" inputmode="decimal" id="indexLevel" step="10" />
-              <span class="field-tip">盤後／盤中自動帶入</span>
             </label>
           </div>
           <label class="check crash-lock-check">
@@ -250,7 +240,7 @@
           </label>
 
           <div class="divider"></div>
-          <div class="sub-heading">下單規格與口數</div>
+          <div class="sub-heading">下單規格與指數點位</div>
           <div class="seg-wrap">
             <span class="seg-label">商品規格</span>
             <div class="seg-group" role="group" aria-label="商品規格">
@@ -264,9 +254,15 @@
               <option value="TX">大台 TX</option>
             </select>
           </div>
-          <label>組數（口）
-            <input type="number" inputmode="numeric" id="contracts" min="1" />
-          </label>
+          <div class="row">
+            <label>組數（口）
+              <input type="number" inputmode="numeric" id="contracts" min="1" />
+            </label>
+            <label>台指期點位
+              <input type="number" inputmode="decimal" id="indexLevel" step="10" />
+              <span class="field-tip">盤後／盤中自動帶入</span>
+            </label>
+          </div>
           <div id="size-cut-note" class="size-cut-note hidden"></div>
         </div>
 
@@ -320,7 +316,7 @@
         </div>
         <div id="exdiv-window" class="muted"></div>
         <div id="exdiv-list" class="exdiv-list"></div>
-        <p class="hint">預估蒸發點數請參考期貨商晨報／XQ「各月份預估除息點數表」，再填入上方欄位。</p>
+        <p class="hint">已依證交所上市普通股發行股數與市值基值自動精算已公告成份股之蒸發點數並帶入理論價（ETF 與純除權不影響大盤）；6～7 月若有大型權值股尚未公告除息日，可於進階設定取消勾選「除息日均已公告」。</p>
       </div>
 
       <div class="card" id="sec-checklist">
@@ -357,7 +353,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="engine.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

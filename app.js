@@ -12,7 +12,6 @@
   const BASE = {
     indexLevel: 23000,
     annualRatePct: 1.75,
-    expectedExDivPoints: 0,
     marketSpread: 25,
     ma10Spread: "",
     foreignNetShort: 30000,
@@ -53,7 +52,7 @@
 
   const FIELDS = Object.keys(BASE);
   const NUMERIC = new Set([
-    "indexLevel", "annualRatePct", "expectedExDivPoints", "marketSpread",
+    "indexLevel", "annualRatePct", "marketSpread",
     "foreignNetShort", "bidAskGap", "contracts",
   ]);
   const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong", "taiex5dChangePct"]);
@@ -62,6 +61,7 @@
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
 
   let market = null;
+  let presetExDivPoints = null;
   let liveApiUrl = "";
   let pollTimer = null;
   let isFetchingLive = false;
@@ -282,8 +282,39 @@
     $("adv-badge").classList.toggle("hidden", !hasCustomAdv);
   }
 
+  function computeAutoExDiv(nearIso, farIso) {
+    if (!market || !Array.isArray(market.exdiv)) {
+      return { totalPoints: 0, rows: [], constituentCount: 0, pendingConstituents: 0, start: null };
+    }
+    const start = iso(new Date(parseIsoDate(nearIso).getTime() + 86400000));
+    const rows = market.exdiv.filter((x) => x.date >= start && x.date <= farIso);
+    let total = 0;
+    let constituentCount = 0;
+    let pendingConstituents = 0;
+    for (const x of rows) {
+      if (x.is_constituent) {
+        constituentCount++;
+        if (x.impact_points != null) total += x.impact_points;
+        else pendingConstituents++;
+      }
+    }
+    return {
+      totalPoints: Math.round(total * 100) / 100,
+      rows,
+      constituentCount,
+      pendingConstituents,
+      start,
+    };
+  }
+
   function render() {
     const inp = readForm();
+    const cal = evaluateEntry({
+      evalDatetime: inp.evalDatetime,
+      nearSettlementOverride: inp.nearSettlementOverride,
+    }).calendar;
+    const autoEx = computeAutoExDiv(cal.nearSettlement, cal.farSettlement);
+    inp.expectedExDivPoints = presetExDivPoints !== null ? presetExDivPoints : autoEx.totalPoints;
     const r = evaluateEntry(inp);
     save();
     renderSimAndAdvanced(inp);
@@ -380,23 +411,29 @@
 
     renderChecks(r.checks);
     renderChecklist(r.checklist);
-    renderExDiv(c.nearSettlement, c.farSettlement);
+    renderExDiv(c.nearSettlement, c.farSettlement, autoEx);
   }
 
-  function renderExDiv(nearIso, farIso) {
+  function renderExDiv(nearIso, farIso, autoEx) {
     const box = $("exdiv-list");
     const win = $("exdiv-window");
     const pill = $("exdiv-count");
     box.innerHTML = "";
     if (!market || !Array.isArray(market.exdiv)) {
-      pill.textContent = "-- 檔";
+      pill.textContent = presetExDivPoints !== null ? `模擬 -${presetExDivPoints} 點` : "-- 檔";
       win.textContent = "尚無除權息預告資料。";
       return;
     }
-    const start = iso(new Date(parseIsoDate(nearIso).getTime() + 86400000));
-    const rows = market.exdiv.filter((x) => x.date >= start && x.date <= farIso);
-    pill.textContent = `${rows.length} 檔`;
-    win.textContent = `區間：${start} ～ ${farIso}（證交所目前已公告者）`;
+    const info = autoEx || computeAutoExDiv(nearIso, farIso);
+    const { start, rows, totalPoints, constituentCount, pendingConstituents } = info;
+    pill.textContent =
+      presetExDivPoints !== null
+        ? `模擬 -${presetExDivPoints} 點`
+        : `${rows.length} 檔｜自動 -${totalPoints} 點`;
+    win.textContent =
+      `區間：${start} ～ ${farIso}（證交所目前已公告者；大盤成份股 ${constituentCount} 檔` +
+      (pendingConstituents > 0 ? `，另有 ${pendingConstituents} 檔金額待公告` : "") +
+      "）";
 
     if (rows.length === 0) {
       const empty = document.createElement("div");
@@ -410,8 +447,19 @@
     for (const x of rows) {
       const d = document.createElement("div");
       d.className = "exdiv-item";
-      const cash = x.cash_dividend == null ? "待公告" : `現金 ${x.cash_dividend}`;
-      for (const [cls, txt] of [["d", x.date.slice(5)], ["n", `${x.code} ${x.name}（${x.type}）`], ["c", cash]]) {
+      let rightText;
+      if (x.is_constituent === false) {
+        rightText = `${x.cash_dividend == null ? "待公告" : `現金 ${x.cash_dividend}`}（不計入）`;
+      } else if (x.type === "權" && (!x.cash_dividend || x.cash_dividend === 0)) {
+        rightText = "除權（0點）";
+      } else if (x.cash_dividend == null || x.impact_points == null) {
+        rightText = "待公告";
+      } else if (x.impact_points > 0) {
+        rightText = `現金 ${x.cash_dividend}（-${x.impact_points}點）`;
+      } else {
+        rightText = `現金 ${x.cash_dividend}（0點）`;
+      }
+      for (const [cls, txt] of [["d", x.date.slice(5)], ["n", `${x.code} ${x.name}（${x.type}）`], ["c", rightText]]) {
         const s = document.createElement("span");
         s.className = cls;
         s.textContent = txt;
@@ -486,6 +534,7 @@
 
   function applyMarket() {
     if (!market) return;
+    presetExDivPoints = null;
     const tx = market.tx || {};
     const fo = market.foreign || {};
     const tr = market.trust || {};
@@ -587,6 +636,7 @@
       if (data.spread?.bidAskGap != null) {
         $("bidAskGap").value = data.spread.bidAskGap;
       }
+      presetExDivPoints = null;
       $("evalDatetime").value = "";
 
       hasLiveQuote = true;
@@ -739,7 +789,12 @@
     document.querySelectorAll("[data-preset]").forEach((b) =>
       b.addEventListener("click", () => {
         const key = b.dataset.preset;
-        if (key === "reset") checkedSteps.clear();
+        if (key === "reset") {
+          checkedSteps.clear();
+          presetExDivPoints = null;
+        } else {
+          presetExDivPoints = PRESETS[key].expectedExDivPoints ?? 0;
+        }
         setForm(
           key === "reset"
             ? Object.assign({}, BASE, { annualRatePct: getDefaultAnnualRate() })
@@ -755,6 +810,7 @@
       render();
     });
     $("btn-exit-sim").addEventListener("click", async () => {
+      presetExDivPoints = null;
       $("evalDatetime").value = "";
       $("nearSettlementOverride").value = "";
       if (market) applyMarket();
