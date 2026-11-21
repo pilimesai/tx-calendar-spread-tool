@@ -4,7 +4,7 @@
 
   const { evaluateEntry, parseIsoDate, iso } = window.SpreadEngine;
   const STORAGE_KEY = "tx-spread-inputs-v2";
-  const DEFAULT_LIVE_API_URL = "";
+  const DEFAULT_LIVE_API_URL = "https://tx-spread-live-proxy.pilimesai.workers.dev";
   const API_STORAGE_KEY = "tx-spread-live-api-v1";
   const POLL_STORAGE_KEY = "tx-spread-live-poll-v1";
   const POLL_INTERVAL_MS = 15000;
@@ -481,7 +481,7 @@
   function startLivePolling() {
     stopLivePolling();
     pollTimer = setInterval(() => {
-      if (!$("chk-live-poll").checked || !liveApiUrl || document.hidden) return;
+      if (!$("chk-live-poll").checked || !liveApiUrl || document.hidden || $("evalDatetime").value) return;
       fetchLiveQuote({ silent: true });
     }, POLL_INTERVAL_MS);
   }
@@ -496,19 +496,23 @@
     let storedPoll = false;
     try {
       storedApi = normalizeApiUrl(localStorage.getItem(API_STORAGE_KEY));
-      storedPoll = localStorage.getItem(POLL_STORAGE_KEY) === "1";
-    } catch (_) {}
+      const rawPoll = localStorage.getItem(POLL_STORAGE_KEY);
+      liveApiUrl = paramApi || storedApi || DEFAULT_LIVE_API_URL;
+      storedPoll = rawPoll === null ? Boolean(liveApiUrl) : rawPoll === "1";
+    } catch (_) {
+      liveApiUrl = paramApi || DEFAULT_LIVE_API_URL;
+      storedPoll = Boolean(liveApiUrl);
+    }
 
-    liveApiUrl = paramApi || storedApi || DEFAULT_LIVE_API_URL;
     $("live-api-url").value = liveApiUrl;
     $("chk-live-poll").checked = storedPoll;
 
     if (liveApiUrl) {
-      setLiveStatus("已設定即時 API，點「⚡ 立即抓盤中」或開啟 15 秒自動更新。", "muted");
+      setLiveStatus("盤中即時報價連線中...", "muted");
     }
 
     return {
-      shouldAutoFetch: Boolean(paramApi && (params.get("autolive") === "1" || paramApi)) || Boolean(storedPoll && liveApiUrl),
+      shouldAutoFetch: Boolean(liveApiUrl),
     };
   }
 
@@ -575,7 +579,7 @@
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && $("chk-live-poll").checked && liveApiUrl) {
+      if (!document.hidden && $("chk-live-poll").checked && liveApiUrl && !$("evalDatetime").value) {
         fetchLiveQuote({ silent: true });
       }
     });
@@ -594,11 +598,12 @@
       await fetchMarket();
       render();
     });
-    $("btn-exit-sim").addEventListener("click", () => {
+    $("btn-exit-sim").addEventListener("click", async () => {
       $("evalDatetime").value = "";
       $("nearSettlementOverride").value = "";
       if (market) applyMarket();
       else render();
+      if (liveApiUrl) await fetchLiveQuote({ silent: true });
     });
 
     const { shouldAutoFetch } = initLiveConfig();
