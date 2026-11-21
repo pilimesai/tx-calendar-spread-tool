@@ -112,8 +112,9 @@
         : countWeekdays(today, nearSettlement);
     const isSettlementDay = iso(today) === iso(nearSettlement);
 
-    // 2. 理論價差
-    const fundingCost = r2((inp.indexLevel * (inp.annualRatePct / 100)) / 12);
+    // 2. 理論價差（依近月結算日到遠月結算日的實際間隔天數計算資金成本）
+    const settlementGapDays = Math.max(1, Math.round((farSettlement.getTime() - nearSettlement.getTime()) / 86400000));
+    const fundingCost = r2(inp.indexLevel * (inp.annualRatePct / 100) * (settlementGapDays / 365));
     const theoreticalSpread = r2(fundingCost - inp.expectedExDivPoints);
     const mispricing = r2(inp.marketSpread - theoreticalSpread);
     const discountPoints = r2(-mispricing);
@@ -341,6 +342,7 @@
         evalDate: iso(today),
         nearSettlement: iso(nearSettlement),
         farSettlement: iso(farSettlement),
+        settlementGapDays,
         tradingDaysLeft,
         isSettlementDay,
         isExDivSeason,

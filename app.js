@@ -114,11 +114,11 @@
     return `${n >= 0 ? "+" : "-"}NT$ ${Math.abs(n).toLocaleString("en-US")}`;
   }
 
-  function renderGauge(v) {
+  function renderGauge(v, c) {
     $("gauge-plain").textContent = v.plainSummary;
     $("gauge-mid-label").textContent = `理論合理價 ${v.theoreticalSpread}`;
     $("gauge-formula").textContent =
-      `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost} − 預計除息 ${v.expectedExDivPoints}`;
+      `理論價 ${v.theoreticalSpread} = 資金利息 +${v.fundingCost}（${c.settlementGapDays}天/365）− 預計除息 ${v.expectedExDivPoints}`;
 
     const clamped = Math.max(-60, Math.min(60, v.mispricing));
     const pct = 50 + (clamped / 60) * 46;
@@ -266,10 +266,10 @@
     const dayWord = c.isSettlementDay ? "今日結算" : `剩 ${c.tradingDaysLeft} 交易日`;
     $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}`;
 
-    renderGauge(v);
+    renderGauge(v, c);
 
     $("m-theory").textContent = `${v.theoreticalSpread} 點`;
-    $("m-theory-sub").textContent = `利息 +${v.fundingCost} − 除息 ${v.expectedExDivPoints}`;
+    $("m-theory-sub").textContent = `利息 +${v.fundingCost}（${c.settlementGapDays}天）− 除息 ${v.expectedExDivPoints}`;
 
     const disc = $("m-disc");
     disc.textContent = v.mispricing > 0 ? `貴了 ${v.mispricing} 點` : `便宜 ${v.discountPoints} 點`;
