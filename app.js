@@ -57,7 +57,23 @@
   const $ = (id) => document.getElementById(id);
 
   function normalizeApiUrl(raw) {
-    return String(raw || "").trim().replace(/\/+$/, "");
+    const s = String(raw || "").trim().replace(/\/+$/, "");
+    if (!s) return "";
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }
+
+  function isSelfOrInvalidApiUrl(url) {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.endsWith(".github.io")) return true;
+      if (parsed.origin === window.location.origin && !parsed.pathname.includes("worker")) {
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return true;
+    }
   }
 
   function syncContractButtons(value) {
@@ -436,9 +452,23 @@
         cache: "no-store",
         signal: AbortSignal.timeout(8000),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        throw new Error(
+          `API 回傳網頁而非 JSON（HTTP ${res.status}），請點「⚙️ 設定 API」確認網址為 *.workers.dev 或按「重設預設網址」`
+        );
+      }
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+        const rawErr = data?.error || `HTTP ${res.status}`;
+        if (/HTTP\s*520/i.test(rawErr)) {
+          throw new Error(
+            "期交所即時系統暫時無回應（HTTP 520，可能逢非交易時段維護或暫時限制雲端主機連線），原輸入已保留，盤中可改手動填券商即時價差"
+          );
+        }
+        throw new Error(rawErr);
       }
 
       if (data.near?.last != null) {
@@ -488,7 +518,8 @@
 
   function initLiveConfig() {
     const params = new URLSearchParams(window.location.search);
-    const paramApi = normalizeApiUrl(params.get("api"));
+    let paramApi = normalizeApiUrl(params.get("api"));
+    if (isSelfOrInvalidApiUrl(paramApi)) paramApi = "";
     if (paramApi) {
       try { localStorage.setItem(API_STORAGE_KEY, paramApi); } catch (_) {}
     }
@@ -496,6 +527,10 @@
     let storedPoll = false;
     try {
       storedApi = normalizeApiUrl(localStorage.getItem(API_STORAGE_KEY));
+      if (isSelfOrInvalidApiUrl(storedApi)) {
+        localStorage.removeItem(API_STORAGE_KEY);
+        storedApi = "";
+      }
       const rawPoll = localStorage.getItem(POLL_STORAGE_KEY);
       liveApiUrl = paramApi || storedApi || DEFAULT_LIVE_API_URL;
       storedPoll = rawPoll === null ? Boolean(liveApiUrl) : rawPoll === "1";
@@ -546,7 +581,12 @@
       $("live-api-panel").classList.toggle("hidden");
     });
     $("btn-save-api").addEventListener("click", async () => {
-      liveApiUrl = normalizeApiUrl($("live-api-url").value);
+      const nextUrl = normalizeApiUrl($("live-api-url").value);
+      if (nextUrl && isSelfOrInvalidApiUrl(nextUrl)) {
+        setLiveStatus("請輸入有效的 Cloudflare Worker 網址（*.workers.dev），不可填入 github.io 靜態頁網址。", "err");
+        return;
+      }
+      liveApiUrl = nextUrl;
       $("live-api-url").value = liveApiUrl;
       try {
         if (liveApiUrl) localStorage.setItem(API_STORAGE_KEY, liveApiUrl);
@@ -556,6 +596,13 @@
         setLiveStatus("已清除 API 網址。", "muted");
         return;
       }
+      $("live-api-panel").classList.add("hidden");
+      await fetchLiveQuote({ silent: false });
+    });
+    $("btn-reset-api").addEventListener("click", async () => {
+      try { localStorage.removeItem(API_STORAGE_KEY); } catch (_) {}
+      liveApiUrl = DEFAULT_LIVE_API_URL;
+      $("live-api-url").value = liveApiUrl;
       $("live-api-panel").classList.add("hidden");
       await fetchLiveQuote({ silent: false });
     });

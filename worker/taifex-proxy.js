@@ -153,6 +153,16 @@ export function buildLivePayload({ contract, session, spot, nearCode, farCode, d
   };
 }
 
+const CODE_TTL_MS = 10 * 60 * 1000;
+const QUOTE_TTL_MS = 10 * 1000;
+const codeCache = new Map();
+const quoteCache = new Map();
+
+export function clearCache() {
+  codeCache.clear();
+  quoteCache.clear();
+}
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -168,15 +178,23 @@ async function postTaifex(endpoint, payload, fetchImpl) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json, text/plain, */*",
       "User-Agent": "Mozilla/5.0 (tx-spread-live-proxy)",
+      Origin: "https://mis.taifex.com.tw",
       Referer: "https://mis.taifex.com.tw/futures/",
     },
     body: JSON.stringify(payload),
   });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (_) {
+    throw new Error(`期交所回傳非 JSON 頁面（HTTP ${res.status}），可能正在系統維護中`);
+  }
   if (!res.ok) {
     throw new Error(`期交所回應 HTTP ${res.status}`);
   }
-  const data = await res.json();
   if (data?.RtCode !== "0") {
     throw new Error(data?.RtMsg || `期交所錯誤碼 ${data?.RtCode ?? "unknown"}`);
   }
@@ -193,7 +211,13 @@ function hasAnyQuote(payload) {
   );
 }
 
-async function fetchSessionPayload(contract, session, fetchImpl) {
+async function getSessionCodes(session, fetchImpl) {
+  const now = Date.now();
+  const cached = codeCache.get(session);
+  if (cached && now - cached.ts < CODE_TTL_MS) {
+    return cached.value;
+  }
+
   const marketType = session === "night" ? "1" : "0";
   const quoteList = await postTaifex(
     "getQuoteList",
@@ -211,11 +235,23 @@ async function fetchSessionPayload(contract, session, fetchImpl) {
     fetchImpl
   );
 
-  const { nearCode, farCode, spot } = extractNearFarCodes(quoteList);
-  if (!nearCode || !farCode) {
+  const value = extractNearFarCodes(quoteList);
+  if (!value.nearCode || !value.farCode) {
     throw new Error("無法識別近月與遠月台指期合約代碼");
   }
+  codeCache.set(session, { ts: now, value });
+  return value;
+}
 
+async function fetchSessionPayload(contract, session, fetchImpl) {
+  const cacheKey = `${contract}:${session}`;
+  const now = Date.now();
+  const cachedQuote = quoteCache.get(cacheKey);
+  if (cachedQuote && now - cachedQuote.ts < QUOTE_TTL_MS) {
+    return cachedQuote.payload;
+  }
+
+  const { nearCode, farCode, spot } = await getSessionCodes(session, fetchImpl);
   const cid = CONTRACT_CID[contract];
   const suffix = session === "night" ? "M" : "F";
   const detailList = await postTaifex(
@@ -230,7 +266,9 @@ async function fetchSessionPayload(contract, session, fetchImpl) {
     fetchImpl
   );
 
-  return buildLivePayload({ contract, session, spot, nearCode, farCode, detailList });
+  const payload = buildLivePayload({ contract, session, spot, nearCode, farCode, detailList });
+  quoteCache.set(cacheKey, { ts: now, payload });
+  return payload;
 }
 
 export async function handleRequest(request, fetchImpl = fetch) {

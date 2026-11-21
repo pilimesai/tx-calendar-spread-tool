@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=5" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=5" />
-  <link rel="manifest" href="manifest.json?v=5" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=6" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=6" />
+  <link rel="manifest" href="manifest.json?v=6" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=5" />
+  <link rel="stylesheet" href="index.css?v=6" />
 </head>
 <body>
   <header class="app-header">
@@ -179,6 +179,7 @@
           </label>
           <div class="btn-row">
             <button type="button" class="btn primary" id="btn-save-api">儲存並抓取</button>
+            <button type="button" class="btn" id="btn-reset-api">重設預設網址</button>
           </div>
           <p class="hint">需先部署 <code>worker/taifex-proxy.js</code> 到免費 Cloudflare Worker（約 2 分鐘），網址會自動儲存在這支手機。</p>
         </div>
@@ -327,7 +328,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="engine.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
