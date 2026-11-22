@@ -6,6 +6,7 @@
   const STORAGE_KEY = "tx-spread-inputs-v3";
   const DEFAULT_LIVE_API_URL = "https://tx-spread-live-proxy.pilimesai.workers.dev";
   const API_STORAGE_KEY = "tx-spread-live-api-v1";
+  const MARKET_STAMP_KEY = "tx-spread-market-stamp-v1";
   const POLL_STORAGE_KEY = "tx-spread-live-poll-v1";
   const POLL_INTERVAL_MS = 15000;
 
@@ -564,7 +565,55 @@
     if (market.rate?.annual_rate_pct != null) $("annualRatePct").value = market.rate.annual_rate_pct;
     $("evalDatetime").value = "";
     $("nearSettlementOverride").value = "";
+    markMarketStamp();
     render();
+  }
+
+  function marketStamp() {
+    return market ? String(market.tx?.date || market.generated_at || "") : "";
+  }
+
+  function markMarketStamp() {
+    const stamp = marketStamp();
+    if (!stamp) return;
+    try { localStorage.setItem(MARKET_STAMP_KEY, stamp); } catch (_) { }
+  }
+
+  /**
+   * 開啟頁面時同步「盤後自動欄位」：
+   * - 盤後資料換日（新交易日）→ 全部以最新盤後數字覆蓋，避免沿用舊日數字
+   * - 同一交易日 → 只補空白欄位（保留使用者當天手動修改）
+   */
+  function syncMarketDerived() {
+    if (!market) return;
+    const tx = market.tx || {};
+    const fo = market.foreign || {};
+    const tr = market.trust || {};
+    let lastStamp = "";
+    try { lastStamp = localStorage.getItem(MARKET_STAMP_KEY) || ""; } catch (_) { }
+    const stamp = marketStamp();
+    const isNewDay = Boolean(stamp) && stamp !== lastStamp;
+
+    const fill = (id, val, onlyNewDay = false) => {
+      if (val == null) return;
+      const el = $(id);
+      if (isNewDay || (!onlyNewDay && el.value === "")) el.value = val;
+    };
+    fill("indexLevel", tx.near_price ? Math.round(tx.near_price) : null, true);
+    fill("marketSpread", tx.spread, true);
+    fill("ma10Spread", tx.ma10_spread);
+    fill("foreignNetShort", fo.net_short, true);
+    fill("trustNetLong", tr.net_long);
+    fill("trustChange20dPct", tr.change_20d_pct);
+    fill("taiex5dChangePct", market.taiex?.change_5d_pct);
+    if (
+      market.rate?.annual_rate_pct != null &&
+      (isNewDay || Number($("annualRatePct").value) === BASE.annualRatePct)
+    ) {
+      $("annualRatePct").value = market.rate.annual_rate_pct;
+    }
+    $("crashWeekLocked").checked = detectCrashWeekLocked(market);
+    markMarketStamp();
   }
 
   async function fetchMarket() {
@@ -820,18 +869,7 @@
     if (!saved && market) {
       applyMarket();
     } else {
-      if (market?.rate?.annual_rate_pct != null && Number($("annualRatePct").value) === BASE.annualRatePct) {
-        $("annualRatePct").value = market.rate.annual_rate_pct;
-      }
-      if (saved && saved.trustChange20dPct === undefined && market?.trust?.change_20d_pct != null) {
-        $("trustChange20dPct").value = market.trust.change_20d_pct;
-      }
-      if (saved && saved.taiex5dChangePct === undefined && market?.taiex?.change_5d_pct != null) {
-        $("taiex5dChangePct").value = market.taiex.change_5d_pct;
-      }
-      if (saved && saved.crashWeekLocked === undefined && market) {
-        $("crashWeekLocked").checked = detectCrashWeekLocked(market);
-      }
+      if (market) syncMarketDerived();
       render();
     }
 
