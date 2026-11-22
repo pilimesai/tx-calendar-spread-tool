@@ -6,6 +6,7 @@
 - 期交所 OpenAPI：台指期（TX）各月份結算價 → 近／遠月價差
 - 期交所歷史下載（futDataDown）：近 10 個交易日近遠月價差 → MA10
 - 期交所 OpenAPI：三大法人台指期未平倉 → 投信淨多單、外資淨空單
+- 期交所歷史下載（futContractsDateDown）：投信淨多單近 20 個交易日增減趨勢
 - 銀行公會 TAIBOR：1 個月期定盤利率 → 無風險短期年利率
 - 證交所：每日盤後統計（FMTQIK）→ 加權指數收盤與近 5 日漲跌幅
 - 證交所：除權除息預告表（TWT48U）＋ 上市發行股數（t187ap03_L）＋ 每日收盤（STOCK_DAY_ALL）→ 自動計算區間成份股蒸發點數
@@ -30,6 +31,7 @@ UA = {"User-Agent": "Mozilla/5.0 (tx-calendar-spread-tool)", "Accept": "applicat
 
 TAIFEX_FUT = "https://openapi.taifex.com.tw/v1/DailyMarketReportFut"
 TAIFEX_INST = "https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate"
+TAIFEX_INST_CSV = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
 TAIFEX_FUT_CSV = "https://www.taifex.com.tw/cht/3/futDataDown"
 TAIBOR_DAILY_INDEX = "https://www.ba.org.tw/taiborDaily/index"
 TAIBOR_DOWNLOAD_BASE = "https://www.ba.org.tw/taiborDaily/DownloadAll?id="
@@ -157,6 +159,68 @@ def fetch_institutional() -> tuple[dict, dict]:
     if foreign is None or trust is None:
         raise RuntimeError("期交所資料中找不到完整的外資或投信台指期未平倉")
     return foreign, trust
+
+
+def fetch_trust_trend(latest_date_str: str | None = None, latest_net_long: int | None = None) -> dict:
+    """抓取期交所近 50 個日曆日三大法人台指期歷史資料，計算投信淨多單近 20 個交易日增減趨勢。"""
+    if latest_date_str and re.fullmatch(r"\d{8}", str(latest_date_str).strip()):
+        end_d = datetime.strptime(str(latest_date_str).strip(), "%Y%m%d").date()
+    else:
+        end_d = datetime.now(TPE).date()
+    start_d = end_d - timedelta(days=50)
+    body = urllib.parse.urlencode(
+        {
+            "queryStartDate": start_d.strftime("%Y/%m/%d"),
+            "queryEndDate": end_d.strftime("%Y/%m/%d"),
+            "commodityId": "TXF",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        TAIFEX_INST_CSV,
+        data=body,
+        headers={"User-Agent": UA["User-Agent"]},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        txt = resp.read().decode("big5", errors="ignore")
+
+    if "<html" in txt.lower():
+        raise RuntimeError("期交所投信歷史資料回傳非 CSV 格式")
+
+    by_date: dict[str, int] = {}
+    for row in csv.reader(io.StringIO(txt)):
+        if len(row) < 14:
+            continue
+        if row[1].strip() != "臺股期貨" or row[2].strip() != "投信":
+            continue
+        raw_dt = row[0].strip().replace("/", "-")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_dt):
+            continue
+        oi_val = to_num(row[13])
+        if oi_val is not None:
+            by_date[raw_dt] = max(0, int(oi_val))
+
+    series = [{"date": d, "net_long": by_date[d]} for d in sorted(by_date)]
+    if latest_date_str and re.fullmatch(r"\d{8}", str(latest_date_str).strip()) and latest_net_long is not None:
+        latest_iso = f"{latest_date_str[:4]}-{latest_date_str[4:6]}-{latest_date_str[6:8]}"
+        if not series or latest_iso > series[-1]["date"]:
+            series.append({"date": latest_iso, "net_long": max(0, int(latest_net_long))})
+
+    if len(series) < 10:
+        raise RuntimeError("投信台指期歷史資料日數不足")
+
+    prev_idx = max(0, len(series) - 21)
+    cur_item = series[-1]
+    base_item = series[prev_idx]
+    trend_days = len(series) - 1 - prev_idx
+    change_20d = cur_item["net_long"] - base_item["net_long"]
+    change_20d_pct = round((change_20d / base_item["net_long"]) * 100, 2) if base_item["net_long"] > 0 else None
+    return {
+        "prev_20d_date": base_item["date"],
+        "prev_20d_net_long": base_item["net_long"],
+        "change_20d": change_20d,
+        "change_20d_pct": change_20d_pct,
+        "trend_days": trend_days,
+    }
 
 
 def parse_taibor_zip(raw_bytes: bytes) -> dict:
@@ -389,6 +453,15 @@ def main() -> int:
 
     try:
         foreign_data, trust_data = fetch_institutional()
+        try:
+            trust_trend = fetch_trust_trend(trust_data.get("date"), trust_data.get("net_long"))
+            trust_data.update(trust_trend)
+        except Exception as exc:
+            result["errors"].append(f"trust_trend: {exc}")
+            old_trust = old.get("trust") or {}
+            for k in ("prev_20d_date", "prev_20d_net_long", "change_20d", "change_20d_pct", "trend_days"):
+                if k in old_trust:
+                    trust_data[k] = old_trust[k]
         result["foreign"] = foreign_data
         result["trust"] = trust_data
     except Exception as exc:

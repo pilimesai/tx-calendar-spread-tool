@@ -76,6 +76,7 @@
     ma10Spread: null,
     foreignNetShort: 30000,
     trustNetLong: null,
+    trustChange20dPct: null,
     taiex5dChangePct: null,
     crashWeekLocked: false,
     bidAskGap: 2,
@@ -313,6 +314,13 @@
     const chipNetDiff = hasTrust ? trustNetLong - fns : null;
     const chipRatio = hasTrust ? (fns > 0 ? r2(trustNetLong / fns) : 9.99) : null;
 
+    const rawTrustChg = optNum(inp.trustChange20dPct);
+    const hasTrustTrend = rawTrustChg !== null;
+    const trustChange20dPct = hasTrustTrend ? r2(rawTrustChg) : null;
+    const trustTrend = hasTrustTrend ? (trustChange20dPct > 0 ? "expanding" : "shrinking") : null;
+    const trustTrendLabel =
+      trustTrend === "expanding" ? "豆腐變肥" : trustTrend === "shrinking" ? "豆腐縮水" : null;
+
     let chipStatus, chipBadge, chipMsg;
     if (hasTrust) {
       if (fns === 0 || chipRatio >= 0.85 || chipNetDiff >= 0) {
@@ -344,6 +352,11 @@
       chipStatus = "pass";
       chipBadge = "賣壓可控";
       chipMsg = `外資淨空單水位偏低（${fmtInt(fns)} 口），反向轉倉賣壓相對可控。`;
+    }
+    if (trustTrend === "expanding") {
+      chipMsg += ` 投信淨多單較 20 日前增加 +${fmt(trustChange20dPct)}%（豆腐變肥，轉倉買盤推力偏強）。`;
+    } else if (trustTrend === "shrinking") {
+      chipMsg += ` ⚠️ 投信淨多單較 20 日前縮水 ${fmt(trustChange20dPct)}%（豆腐縮水，轉倉力道偏弱，建議維持基本口數不放大 2 倍加碼）。`;
     }
     pushFactor(chipStatus, chipMsg);
 
@@ -423,7 +436,11 @@
         title: hasTrust ? "多空籌碼力道" : "外資籌碼壓力",
         status: chipStatus,
         badge: chipBadge,
-        metric: hasTrust ? `投/外 ${chipRatio}（${chipNetDiff >= 0 ? "+" : ""}${fmtInt(chipNetDiff)}）` : `${fmtInt(fns)} 口`,
+        metric:
+          (hasTrust
+            ? `投/外 ${chipRatio}（${chipNetDiff >= 0 ? "+" : ""}${fmtInt(chipNetDiff)}）`
+            : `${fmtInt(fns)} 口`) +
+          (hasTrustTrend ? `｜20日 ${trustChange20dPct > 0 ? "+" : ""}${fmt(trustChange20dPct)}%` : ""),
         summary: chipMsg,
       },
       {
@@ -460,22 +477,30 @@
       actionSummary =
         (crashStatus === "warn" ? "大盤近 5 日急跌逾 3%，已自動降燈警戒；" : "") +
         "部分條件未達理想或存在潛在變數，若欲參與建議以小台（MTX）或微台（TMF）輕倉分批試單，並嚴控出場時機。" +
-        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "");
+        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "") +
+        (trustTrend === "shrinking" ? `（⚠️ 投信 20 日縮水 ${fmt(trustChange20dPct)}%，維持輕倉不加碼。）` : "");
     } else {
       signal = "GREEN";
       signalShort = "可以分批進場";
       signalLabel = "🟢 建議分批進場（具策略優勢）";
       actionSummary =
         "時間點、折溢價安全邊際與籌碼條件皆符合策略要求，可分批掛 ROD 限價「買進」跨月價差複式單。" +
-        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "");
+        (isExDivPeak ? `（⚠️ 除權降口：${sizeCutHint}。）` : "") +
+        (trustTrend === "shrinking"
+          ? `（⚠️ 投信 20 日縮水 ${fmt(trustChange20dPct)}%，建議維持基本口數、暫停 2 倍加碼。）`
+          : trustTrend === "expanding"
+            ? `（🔥 投信 20 日增胖 +${fmt(trustChange20dPct)}%，轉倉買盤動能強。）`
+            : "");
     }
 
-    // 6. 損益
+    // 6. 損益與虛擬第六檔階梯停利
     const spec = CONTRACT_SPECS[inp.contractType] || CONTRACT_SPECS.MTX;
     const pv = spec.pointValue;
     const hasTarget = inp.targetExitSpread !== null && inp.targetExitSpread !== "" && inp.targetExitSpread !== undefined;
-    const baseTarget = hasMa10 ? Math.max(theoreticalSpread, ma10Spread) : theoreticalSpread;
-    const suggestedExit = hasTarget ? Number(inp.targetExitSpread) : Math.round((baseTarget + 25) * 10) / 10;
+    const baseTarget = r2(hasMa10 ? Math.max(theoreticalSpread, ma10Spread) : theoreticalSpread);
+    const tier1ExitSpread = Math.round((baseTarget + 40) * 10) / 10;
+    const tier2ExitSpread = Math.round((baseTarget + 65) * 10) / 10;
+    const suggestedExit = hasTarget ? Number(inp.targetExitSpread) : tier1ExitSpread;
     const expectedGainPoints = r2(suggestedExit - inp.marketSpread);
     const expectedProfitTwd = Math.round(expectedGainPoints * pv * inp.contracts);
     const stress30 = Math.round(30 * pv * inp.contracts);
@@ -488,28 +513,75 @@
     const scaleUpFloorLabel = hasMa10 ? "min(理論價, MA10)" : "理論價";
     const scaleUpMaxContracts = isExDivPeak ? Math.max(1, inp.contracts) : inp.contracts * 2;
     const canScaleUp = scaleUpMaxContracts > recommendedContracts;
-    const scaleUpTriggered = signal === "GREEN" && canScaleUp && inp.marketSpread <= scaleUpFloor;
+    const scaleUpBlockedByTrustShrink = trustTrend === "shrinking";
+    const scaleUpTriggered =
+      signal === "GREEN" && canScaleUp && !scaleUpBlockedByTrustShrink && inp.marketSpread <= scaleUpFloor;
     const scaleUpProfitTwd = Math.round(expectedGainPoints * pv * scaleUpMaxContracts);
     const scaleUpStress30Twd = Math.round(30 * pv * scaleUpMaxContracts);
     const scaleUpStress50Twd = Math.round(50 * pv * scaleUpMaxContracts);
     let scaleUpHint = null;
     if (scaleUpTriggered) {
-      scaleUpHint = `🔥 觸發超值加碼：目前報價（${fmt(inp.marketSpread)}）≤ ${scaleUpFloorLabel}（${fmt(scaleUpFloor)}），可由 ${recommendedContracts} 口放大至 ${scaleUpMaxContracts} 口（預估損益 ${scaleUpProfitTwd >= 0 ? "+" : "-"}NT$ ${fmtInt(Math.abs(scaleUpProfitTwd))}，50 點洗盤緩衝約 NT$ ${fmtInt(scaleUpStress50Twd)}）`;
+      const expandSuffix =
+        trustTrend === "expanding" ? `｜投信20日 +${fmt(trustChange20dPct)}% 動能助推` : "";
+      scaleUpHint = `🔥 觸發超值加碼：目前報價（${fmt(inp.marketSpread)}）≤ ${scaleUpFloorLabel}（${fmt(scaleUpFloor)}），可由 ${recommendedContracts} 口放大至 ${scaleUpMaxContracts} 口（預估損益 ${scaleUpProfitTwd >= 0 ? "+" : "-"}NT$ ${fmtInt(Math.abs(scaleUpProfitTwd))}，50 點洗盤緩衝約 NT$ ${fmtInt(scaleUpStress50Twd)}${expandSuffix}）`;
+    } else if (signal === "GREEN" && canScaleUp && scaleUpBlockedByTrustShrink) {
+      scaleUpHint =
+        inp.marketSpread <= scaleUpFloor
+          ? `⚠️ 投信淨多單較上月縮水（${fmt(trustChange20dPct)}%），雖報價 ≤ ${fmt(scaleUpFloor)}，本月暫停 2 倍加碼、建議維持 ${recommendedContracts} 口操作`
+          : `⚠️ 投信淨多單較上月縮水（${fmt(trustChange20dPct)}%），本月暫停超值加碼、建議維持 ${recommendedContracts} 口穩健操作`;
     } else if (signal === "GREEN" && canScaleUp) {
-      scaleUpHint = `📌 預掛加碼線：先買 ${recommendedContracts} 口；盤中若壓回 ≤ ${fmt(scaleUpFloor)}（${scaleUpFloorLabel}）可加碼放大至 ${scaleUpMaxContracts} 口`;
+      scaleUpHint = `📌 預掛加碼線：先買 ${recommendedContracts} 口；盤中若壓回 ≤ ${fmt(scaleUpFloor)}（${scaleUpFloorLabel}）可加碼放大至 ${scaleUpMaxContracts} 口（可用 ROD 限價單享虛擬第六檔優先撮合）`;
     }
+
+    const effectiveContracts = scaleUpTriggered ? scaleUpMaxContracts : recommendedContracts;
+    const tier1Contracts = effectiveContracts >= 2 ? Math.ceil(effectiveContracts / 2) : effectiveContracts;
+    const tier2Contracts = effectiveContracts - tier1Contracts;
+    const tier1GainPoints = r2(tier1ExitSpread - inp.marketSpread);
+    const tier2GainPoints = r2(tier2ExitSpread - inp.marketSpread);
+    const tier1ProfitTwd = Math.round(tier1GainPoints * pv * tier1Contracts);
+    const tier2ProfitTwd = Math.round(tier2GainPoints * pv * tier2Contracts);
+    const ladderTotalProfitTwd = tier1ProfitTwd + tier2ProfitTwd;
+    const exitLadder = {
+      isCustom: hasTarget,
+      baseTarget,
+      effectiveContracts,
+      tier1: {
+        offset: 40,
+        spread: tier1ExitSpread,
+        gainPoints: tier1GainPoints,
+        contracts: tier1Contracts,
+        profitTwd: tier1ProfitTwd,
+      },
+      tier2: {
+        offset: 65,
+        spread: tier2ExitSpread,
+        gainPoints: tier2GainPoints,
+        contracts: tier2Contracts,
+        profitTwd: tier2ProfitTwd,
+      },
+      totalProfitTwd: ladderTotalProfitTwd,
+    };
+
+    const takeProfitChecklist = hasTarget
+      ? `建倉後直接預掛 ROD「賣出」價差限價單於自訂目標價 ${suggestedExit}（享虛擬第六檔優先撮合），或於結算前一天至早盤分批停利。`
+      : effectiveContracts >= 2
+        ? `建倉後善用期交所「虛擬第六檔」優先撮合，直接預掛階梯 ROD 賣出價差單等投信來撞：第 1 批 ${tier1Contracts} 口掛 ${tier1ExitSpread}（基準 +40）先鎖利，第 2 批 ${tier2Contracts} 口掛 ${tier2ExitSpread}（基準 +65）或留至結算早盤平倉。`
+        : `建倉後善用期交所「虛擬第六檔」優先撮合，直接預掛 ROD 賣出價差單等投信來撞：第 1 批掛 ${tier1ExitSpread}（基準 +40）先鎖利，或視轉倉動能拚 ${tier2ExitSpread}（基準 +65）。`;
 
     const checklist = [
       `使用券商軟體「台指期價差（複式單）」介面，選擇 ${inp.contractType} 近月／遠月組合，切勿分開單邊下單。`,
-      "建倉方向選擇「買進」價差單（系統同步成交：賣出近月 ＋ 買進遠月），委託條件限用「ROD 限價單」。",
+      "建倉方向選擇「買進」價差單（系統同步成交：賣出近月 ＋ 買進遠月），委託條件限用「ROD 限價單」（期交所衍生委託視為虛擬第六檔，撮合優先權高於單式限價單）。",
       ...(isExDivPeak
         ? [`⚠️ 除權息高峰降口確認：${sizeCutHint}，避免單月除息估算誤差放大波動。`]
+        : []),
+      ...(scaleUpBlockedByTrustShrink
+        ? [`⚠️ 投信淨多單較 20 日前縮水（${fmt(trustChange20dPct)}%），本月轉倉力道偏弱，維持 ${recommendedContracts} 口不放大加碼，停利偏重第 1 批價位落袋為安。`]
         : []),
       ...(scaleUpTriggered
         ? [`🔥 超值加碼確認：報價已 ≤ ${fmt(scaleUpFloor)}，若放大至 ${scaleUpMaxContracts} 口，請確認帳上預留 50 點洗盤緩衝約 NT$ ${fmtInt(scaleUpStress50Twd)}${isExDivPeak ? "（已套用除權高峰減半上限）" : ""}。`]
         : []),
       `帳上除價差減收保證金外，至少多預留 1～2 倍緩衝資金（預估盤中 30～50 點反向洗盤波動約 NT$ ${fmtInt(stress30)} ～ NT$ ${fmtInt(stress50)}）。`,
-      "結算前一天至結算日早盤正二轉倉推升時，分批掛「賣出」價差限價單停利。",
+      takeProfitChecklist,
       `務必於結算日（${iso(nearSettlement)}）13:00～13:15 前全數平倉，避開 13:15 後流動性黑洞與 13:30 強制現金結算風險。`,
     ];
 
@@ -552,6 +624,9 @@
       chips: {
         foreignNetShort: fns,
         trustNetLong,
+        trustChange20dPct,
+        trustTrend,
+        trustTrendLabel,
         chipNetDiff,
         chipRatio,
       },
@@ -568,11 +643,13 @@
         sizeCutHint,
         scaleUpFloor,
         scaleUpMaxContracts,
+        scaleUpBlockedByTrustShrink,
         scaleUpTriggered,
         scaleUpProfitTwd,
         scaleUpStress30Twd,
         scaleUpStress50Twd,
         scaleUpHint,
+        exitLadder,
         suggestedExitSpread: suggestedExit,
         expectedGainPoints,
         expectedProfitTwd,

@@ -16,6 +16,7 @@
     ma10Spread: "",
     foreignNetShort: 30000,
     trustNetLong: "",
+    trustChange20dPct: "",
     taiex5dChangePct: "",
     crashWeekLocked: false,
     bidAskGap: 2,
@@ -32,7 +33,7 @@
     "indexLevel", "annualRatePct", "marketSpread",
     "foreignNetShort", "bidAskGap", "contracts",
   ]);
-  const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong", "taiex5dChangePct"]);
+  const OPTIONAL_NUMERIC = new Set(["ma10Spread", "trustNetLong", "trustChange20dPct", "taiex5dChangePct"]);
   const STATUS_TEXT = { block: "紅線", warn: "注意", pass: "通過" };
   const STATUS_RANK = { block: 0, warn: 1, pass: 2 };
   const SIGNAL_ICON = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴" };
@@ -331,13 +332,18 @@
           ? `貴了 ${v.mispricing} 點`
           : `便宜 ${v.discountPoints} 點`;
     const dayWord = c.isSettlementDay ? "今日結算" : `剩 ${c.tradingDaysLeft} 交易日`;
-    const scaleSuffix = s.scaleUpTriggered ? ` ・ 🔥可放大${s.scaleUpMaxContracts}口` : "";
+    const scaleSuffix = s.scaleUpTriggered
+      ? ` ・ 🔥可放大${s.scaleUpMaxContracts}口`
+      : r.chips.trustTrend === "shrinking" && r.signal === "GREEN"
+        ? " ・ ⚠️投信縮水"
+        : "";
     $("mini-signal-text").textContent = `${SIGNAL_ICON[r.signal]} ${r.signalShort} ・ ${diffWord} ・ ${dayWord}${scaleSuffix}`;
 
     const scaleBanner = $("scale-up-banner");
     if (s.scaleUpHint) {
       scaleBanner.textContent = s.scaleUpHint;
-      scaleBanner.className = `scale-up-banner ${s.scaleUpTriggered ? "active" : "standby"}`;
+      const bannerTone = s.scaleUpTriggered ? "active" : (s.scaleUpBlockedByTrustShrink ? "warn-pause" : "standby");
+      scaleBanner.className = `scale-up-banner ${bannerTone}`;
     } else {
       scaleBanner.textContent = "";
       scaleBanner.className = "scale-up-banner hidden";
@@ -372,18 +378,46 @@
     }
 
     const p = $("m-profit");
-    p.textContent = s.expectedProfitTwd >= 0 ? `預計賺 ${money(s.expectedProfitTwd)}` : `預估虧 ${money(s.expectedProfitTwd)}`;
-    p.className = `m-value ${s.expectedProfitTwd >= 0 ? "pos" : "neg"}`;
+    const pLadder = $("m-profit-ladder");
+    const el = s.exitLadder;
     const scalePrefix = s.scaleUpTriggered
-      ? `🔥 加碼 ${s.scaleUpMaxContracts} 口預估 ${money(s.scaleUpProfitTwd)}｜`
+      ? `🔥 加碼 ${s.scaleUpMaxContracts} 口｜`
       : "";
     const profitPrefix = s.exDivSizeCut
       ? (s.contracts >= 2
-        ? `⚠️ 降口 ${s.recommendedContracts} 口預估 ${money(s.recommendedProfitTwd)}｜`
+        ? `⚠️ 除權降口 ${s.recommendedContracts} 口｜`
         : `⚠️ ${s.sizeCutHint}｜`)
       : "";
-    $("m-profit-sub").textContent =
-      `${scalePrefix || profitPrefix}目標平倉 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${s.stressLoss30Twd.toLocaleString("en-US")}`;
+    const activeStress30 = s.scaleUpTriggered ? s.scaleUpStress30Twd : s.recommendedStress30Twd;
+
+    if (el && !el.isCustom && el.tier2.contracts > 0) {
+      p.textContent = el.totalProfitTwd >= 0 ? `階梯預估 ${money(el.totalProfitTwd)}` : `預估虧 ${money(el.totalProfitTwd)}`;
+      p.className = `m-value ${el.totalProfitTwd >= 0 ? "pos" : "neg"}`;
+      $("m-profit-sub").textContent =
+        `${scalePrefix || profitPrefix}按 ${el.effectiveContracts} 口分批停利｜30點洗盤波動 ±NT$ ${activeStress30.toLocaleString("en-US")}`;
+      pLadder.textContent =
+        `📌 虛擬第六檔預掛：第1批 ${el.tier1.contracts}口 @ ${el.tier1.spread} (+40)｜第2批 ${el.tier2.contracts}口 @ ${el.tier2.spread} (+65)`;
+      pLadder.classList.remove("hidden");
+    } else if (el && !el.isCustom) {
+      const displayProfit = s.exDivSizeCut ? s.recommendedProfitTwd : s.expectedProfitTwd;
+      p.textContent = displayProfit >= 0 ? `預計賺 ${money(displayProfit)}` : `預估虧 ${money(displayProfit)}`;
+      p.className = `m-value ${displayProfit >= 0 ? "pos" : "neg"}`;
+      $("m-profit-sub").textContent =
+        `${profitPrefix}第1批目標 ${el.tier1.spread}（${el.tier1.gainPoints} 點）｜30點洗盤波動 ±NT$ ${activeStress30.toLocaleString("en-US")}`;
+      pLadder.textContent =
+        `📌 虛擬第六檔預掛：保守 1口 @ ${el.tier1.spread} (+40)｜衝刺參考 ${el.tier2.spread} (+65)`;
+      pLadder.classList.remove("hidden");
+    } else {
+      const activeProfit = s.scaleUpTriggered
+        ? s.scaleUpProfitTwd
+        : (s.exDivSizeCut ? s.recommendedProfitTwd : s.expectedProfitTwd);
+      p.textContent = activeProfit >= 0 ? `預計賺 ${money(activeProfit)}` : `預估虧 ${money(activeProfit)}`;
+      p.className = `m-value ${activeProfit >= 0 ? "pos" : "neg"}`;
+      $("m-profit-sub").textContent =
+        `${scalePrefix || profitPrefix}自訂目標 ${s.suggestedExitSpread}（${s.expectedGainPoints} 點）｜30點洗盤波動 ±NT$ ${activeStress30.toLocaleString("en-US")}`;
+      pLadder.textContent = "";
+      pLadder.classList.add("hidden");
+    }
 
     renderChecks(r.checks);
     renderChecklist(r.checklist);
@@ -489,6 +523,15 @@
       const chg = market.taiex.change_5d_pct;
       infoParts.push(`📉 加權近 5 日：${chg >= 0 ? "+" : ""}${chg}%（${market.taiex.date}）`);
     }
+    if (tr.change_20d_pct != null) {
+      const arrow = tr.change_20d_pct > 0 ? "📈" : "📉";
+      const tag = tr.change_20d_pct > 0 ? "豆腐變肥" : "豆腐縮水";
+      const signChg = tr.change_20d >= 0 ? "+" : "";
+      const signPct = tr.change_20d_pct > 0 ? "+" : "";
+      infoParts.push(
+        `${arrow} 投信 ${tr.trend_days || 20} 日趨勢：${signChg}${tr.change_20d.toLocaleString("en-US")} 口（${signPct}${tr.change_20d_pct}%・${tag}）`
+      );
+    }
     rateEl.textContent = infoParts.join("｜");
     if (!hasLiveQuote) {
       status.textContent = `✅ 盤後資料 ${fmtD(tx.date)}`;
@@ -515,6 +558,7 @@
     if (tx.ma10_spread != null) $("ma10Spread").value = tx.ma10_spread;
     if (fo.net_short != null) $("foreignNetShort").value = fo.net_short;
     if (tr.net_long != null) $("trustNetLong").value = tr.net_long;
+    if (tr.change_20d_pct != null) $("trustChange20dPct").value = tr.change_20d_pct;
     if (market.taiex?.change_5d_pct != null) $("taiex5dChangePct").value = market.taiex.change_5d_pct;
     $("crashWeekLocked").checked = detectCrashWeekLocked(market);
     if (market.rate?.annual_rate_pct != null) $("annualRatePct").value = market.rate.annual_rate_pct;
@@ -778,6 +822,9 @@
     } else {
       if (market?.rate?.annual_rate_pct != null && Number($("annualRatePct").value) === BASE.annualRatePct) {
         $("annualRatePct").value = market.rate.annual_rate_pct;
+      }
+      if (saved && saved.trustChange20dPct === undefined && market?.trust?.change_20d_pct != null) {
+        $("trustChange20dPct").value = market.trust.change_20d_pct;
       }
       if (saved && saved.taiex5dChangePct === undefined && market?.taiex?.change_5d_pct != null) {
         $("taiex5dChangePct").value = market.taiex.change_5d_pct;

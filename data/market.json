@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-22T00:19:20+08:00",
+ "generated_at": "2026-11-22T10:09:44+08:00",
  "errors": [],
  "tx": {
   "date": "20261120",
@@ -61,7 +61,12 @@
  "trust": {
   "date": "20261120",
   "oi_net": 87599,
-  "net_long": 87599
+  "net_long": 87599,
+  "prev_20d_date": "2026-10-21",
+  "prev_20d_net_long": 83778,
+  "change_20d": 3821,
+  "change_20d_pct": 4.56,
+  "trend_days": 20
  },
  "rate": {
   "date": "2026-11-20",

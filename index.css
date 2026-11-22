@@ -211,6 +211,12 @@ body {
   border-left: 4px solid var(--accent);
   color: #bae6fd;
 }
+.scale-up-banner.warn-pause {
+  background: var(--yellow-bg);
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  border-left: 4px solid var(--yellow);
+  color: #fde68a;
+}
 
 /* Spread Valuation Gauge */
 .gauge-header {
@@ -339,6 +345,15 @@ body {
 .m-value-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .m-value { font-size: 1.4rem; font-weight: 700; margin: 3px 0; word-break: break-word; }
 .m-sub { font-size: 0.78rem; color: var(--muted); }
+.m-ladder {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #bae6fd;
+  line-height: 1.4;
+}
 .pos { color: var(--green); }
 .neg { color: var(--red); }
 
@@ -417,6 +432,7 @@ body {
 
 /* Inputs & Forms */
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.field-single { margin-bottom: 10px; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.83rem; color: var(--muted); min-width: 0; }
 .field-tip { font-size: 0.74rem; color: var(--muted); opacity: 0.85; }
 input[type="number"], input[type="date"], input[type="datetime-local"], input[type="url"], select {

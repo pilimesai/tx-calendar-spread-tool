@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>台指期跨月價差 | 進場決策工具</title>
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=13" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=13" />
-  <link rel="manifest" href="manifest.json?v=13" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png?v=14" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=14" />
+  <link rel="manifest" href="manifest.json?v=14" />
   <meta name="theme-color" content="#121826" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="跨月價差" />
   <meta property="og:title" content="台指期跨月價差（吃正二轉倉豆腐）進場決策工具" />
-  <link rel="stylesheet" href="index.css?v=13" />
+  <link rel="stylesheet" href="index.css?v=14" />
 </head>
 <body>
   <header class="app-header">
@@ -109,9 +109,10 @@
           <div class="m-sub" id="m-days-sub">--</div>
         </div>
         <div class="metric">
-          <div class="m-label">💰 預估損益／洗盤</div>
+          <div class="m-label">💰 預估損益／階梯停利</div>
           <div class="m-value" id="m-profit">--</div>
           <div class="m-sub" id="m-profit-sub">--</div>
+          <div class="m-ladder hidden" id="m-profit-ladder"></div>
         </div>
       </div>
 
@@ -225,13 +226,19 @@
             </label>
           </div>
           <div class="row">
-            <label>五檔買賣價差（點）
-              <input type="number" inputmode="decimal" id="bidAskGap" step="1" min="0" />
-              <span class="field-tip">委賣 − 委買，≤ 5 點佳</span>
+            <label>投信 20 日增減 (%)
+              <input type="number" inputmode="decimal" id="trustChange20dPct" step="0.1" placeholder="選填" />
+              <span class="field-tip">&gt;0% 豆腐變肥｜≤0% 縮水停加碼</span>
             </label>
             <label>大盤近 5 日漲跌幅 (%)
               <input type="number" inputmode="decimal" id="taiex5dChangePct" step="0.1" placeholder="選填" />
               <span class="field-tip">跌逾 3% 降黃燈｜跌逾 5% 亮紅燈</span>
+            </label>
+          </div>
+          <div class="field-single">
+            <label>五檔買賣價差（點）
+              <input type="number" inputmode="decimal" id="bidAskGap" step="1" min="0" />
+              <span class="field-tip">委賣 − 委買，≤ 5 點佳</span>
             </label>
           </div>
           <label class="check crash-lock-check">
@@ -285,7 +292,7 @@
                 <input type="number" inputmode="decimal" id="annualRatePct" step="0.001" />
               </label>
               <label>自訂目標平倉價差
-                <input type="number" inputmode="decimal" id="targetExitSpread" step="1" placeholder="預設理論 +25" />
+                <input type="number" inputmode="decimal" id="targetExitSpread" step="1" placeholder="預設階梯 +40/+65" />
               </label>
             </div>
             <label class="check">
@@ -324,10 +331,13 @@
             • <strong>價值折價買點</strong>：報價低於理論價，具絕對安全邊際。<br />
             • <strong>回檔買點</strong>：正價差常態下若壓回至「近 10 日均價差（MA10）」以下，代表短線沒追高，也屬於安全卡位區。
           </p>
-          <p><strong>2. 多空籌碼拔河（投信多 vs 外資空）、除權降口與超值加碼</strong><br />
-            正二 ETF 轉倉主力反映在「投信淨多單」，當 <strong>投信淨多 ÷ 外資淨空 ≥ 0.85</strong> 時買盤足以抗衡；於 <strong>6～7 月或預計除息 ≥ 150 點高峰</strong> 自動建議口數減半。綠燈且報價壓回 <strong>≤ min(理論價, MA10)</strong> 時提醒可放大 <strong>2 倍口數</strong>（除權高峰仍維持減半上限，最多回到原設定口數）。
+          <p><strong>2. 多空籌碼、投信 20 日趨勢、除權降口與超值加碼</strong><br />
+            ETF（正二＋高息 ETF）轉倉主力反映在「投信淨多單」，當 <strong>投信淨多 ÷ 外資淨空 ≥ 0.85</strong> 時買盤足以抗衡；系統同步追蹤<strong>投信淨多單較 20 日前增減</strong>（變肥＝推力強；縮水＝暫停 2 倍加碼）。於 <strong>6～7 月或預計除息 ≥ 150 點高峰</strong> 自動建議口數減半。綠燈、投信未縮水且報價壓回 <strong>≤ min(理論價, MA10)</strong> 時提醒可放大 <strong>2 倍口數</strong>（除權高峰仍維持減半上限，最多回到原設定口數）。
           </p>
-          <p><strong>3. 絕對不能碰的 4 個風控紅線</strong><br />
+          <p><strong>3. 期交所「虛擬第六檔」階梯預掛停利</strong><br />
+            台指期跨月價差 ROD 限價單會轉為單式盤口的「最佳衍生一檔（虛擬第六檔）」，<strong>撮合優先權高於一般單式限價單</strong>。建倉後建議直接以基準價（<code>max(理論價, MA10)</code>）預掛階梯 ROD 賣單等投信轉倉來撞：<strong>第 1 批 +40 點</strong>先鎖利、<strong>第 2 批 +65 點</strong>（或結算日 13:15 前平倉）。
+          </p>
+          <p><strong>4. 絕對不能碰的 4 個風控紅線</strong><br />
             ① <strong>結算日 13:15 後</strong>：五檔稀疏滑價大，13:30 未平倉會留下純遠月多單裸露風險。<br />
             ② <strong>短線過熱追高</strong>：同時高於理論價且超漲近 10 日均價差（超過動態過熱上限），或<strong>五檔跳空 ≥ 15 點</strong>。<br />
             ③ <strong>外資籌碼壓制</strong>：投信買盤顯著不敵外資空單且缺乏折價保護。<br />
@@ -340,7 +350,7 @@
 
   <footer class="footer">本工具僅供輔助判斷，不構成投資建議。資料來源：期交所 OpenAPI、證交所。</footer>
 
-  <script src="engine.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="engine.js?v=14"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
